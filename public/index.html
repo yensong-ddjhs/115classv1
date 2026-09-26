@@ -119,9 +119,13 @@
     <!-- 遊戲舞台（登入後顯示，預設隱藏） -->
     <div id="gameStageWrapper" class="hidden w-full flex flex-col">
       <!-- 遊戲內頂部工具列 -->
-      <div class="flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-slate-800 backdrop-blur rounded-t-xl">
-        <span id="gameStageStudentLabel" class="font-mono text-sm text-cyan-300 font-bold"></span>
-        <button onclick="logoutStudent()" class="text-xs text-slate-400 hover:text-rose-400 transition-colors px-3 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/10">
+      <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 backdrop-blur rounded-t-xl">
+        <div class="flex flex-wrap items-center gap-3">
+          <span id="gameStageStudentLabel" class="font-mono text-sm text-cyan-300 font-bold mr-1"></span>
+          <!-- 動態遊戲選單容器 -->
+          <div id="gameMenu" class="flex flex-wrap items-center gap-2"></div>
+        </div>
+        <button onclick="logoutStudent()" class="text-xs text-slate-400 hover:text-rose-400 transition-colors px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/10 flex items-center gap-1">
           ← 登出
         </button>
       </div>
@@ -142,6 +146,61 @@
   </footer>
 
   <script>
+    // 遊戲列表陣列（未來新增遊戲只要在此陣列多加一行，就會自動生成選單按鈕）
+    const games = [
+      { id: 'game1', name: '遊戲一：英打挑戰 × 硬體配對', path: 'games/game1.html' },
+      { id: 'game2', name: '遊戲二：二進位解密 × 硬體連連看', path: 'games/game2.html' },
+      { id: 'game3', name: '遊戲三：迷霧探索與二進位對決', path: 'games/game3.html' }
+    ];
+
+    let currentGameId = games.length > 0 ? games[0].id : '';
+
+    // 動態生成選單按鈕
+    function renderGameMenu() {
+      const menuContainer = document.getElementById('gameMenu');
+      if (!menuContainer) return;
+      menuContainer.innerHTML = '';
+
+      games.forEach(game => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = game.name;
+        btn.dataset.gameId = game.id;
+
+        const isActive = game.id === currentGameId;
+        btn.className = `px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 border cursor-pointer ${
+          isActive
+            ? 'bg-cyan-600 text-white border-cyan-400 shadow-md shadow-cyan-500/20'
+            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
+        }`;
+
+        btn.onclick = () => {
+          switchGame(game.id);
+        };
+
+        menuContainer.appendChild(btn);
+      });
+    }
+
+    // 切換遊戲並更新 iframe src 與選單按鈕狀態
+    function switchGame(gameId) {
+      const game = games.find(g => g.id === gameId);
+      if (!game) return;
+
+      currentGameId = game.id;
+      const iframe = document.getElementById('game-stage');
+      if (iframe) {
+        iframe.src = game.path;
+      }
+      renderGameMenu();
+      if (window.sound && typeof sound.playTick === 'function') {
+        sound.playTick();
+      }
+    }
+
+    // 初始化動態選單
+    renderGameMenu();
+
     // 預先生成學生下拉選單
     const studentSelect = document.getElementById('studentSelect');
     for (let i = 1; i <= 30; i++) {
@@ -188,17 +247,20 @@
       // 依 PROMPT_RULES.md 資料傳遞標準：寫入 localStorage
       localStorage.setItem('studentId', studentId);
 
-      // 切換至遊戲舞台，以 iframe 載入 game1
+      // 切換至遊戲舞台，以 iframe 載入目前選中的遊戲
       document.getElementById('loginPanel').classList.add('hidden');
       document.getElementById('gameStageWrapper').classList.remove('hidden');
       document.getElementById('gameStageStudentLabel').innerText = `🎓 ${studentId.toUpperCase()} 已登入`;
-      document.getElementById('game-stage').src = '/games/game1.html';
+      if (games.length > 0) {
+        switchGame(currentGameId || games[0].id);
+      }
     }
 
     // 登出：清除 localStorage 並回到登入面板
     function logoutStudent() {
       localStorage.removeItem('studentId');
-      document.getElementById('game-stage').src = '';
+      const iframe = document.getElementById('game-stage');
+      if (iframe) iframe.src = '';
       document.getElementById('gameStageWrapper').classList.add('hidden');
       document.getElementById('loginPanel').classList.remove('hidden');
     }
@@ -215,11 +277,18 @@
     // 只有在學生已登入（iframe 舞台顯示中）才執行切換
     function loadGameInIframe(gameNum) {
       const wrapper = document.getElementById('gameStageWrapper');
-      const iframe  = document.getElementById('game-stage');
       if (wrapper.classList.contains('hidden')) return; // 尚未登入，不切換
-      const newSrc = `/games/game${gameNum}.html`;
-      if (iframe.src !== window.location.origin + newSrc) {
-        iframe.src = newSrc;
+      
+      const game = games.find(g => 
+        g.id === String(gameNum) || 
+        g.id === `game${gameNum}` || 
+        g.path.includes(`game${gameNum}`)
+      );
+      if (game) {
+        switchGame(game.id);
+      } else {
+        const iframe = document.getElementById('game-stage');
+        if (iframe) iframe.src = `games/game${gameNum}.html`;
       }
     }
 

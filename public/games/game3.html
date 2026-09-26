@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>遊戲三：迷霧探索與二進位對決</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+  <style>
+    /* 迷霧畫布容器 */
+    .game-canvas-container {
+      position: relative;
+      user-select: none;
+      touch-action: none;
+      box-shadow: 0 0 35px rgba(6, 182, 212, 0.15);
+    }
+    canvas {
+      display: block;
+      background-color: #050b14;
+      border-radius: 1rem;
+    }
+    /* 虛擬方向鍵樣式 */
+    .d-btn {
+      transition: all 0.1s ease;
+      touch-action: manipulation;
+    }
+    .d-btn:active {
+      transform: scale(0.92);
+      background-color: #0284c7;
+    }
+    /* 霓虹發光字體 */
+    .neon-text-cyan {
+      text-shadow: 0 0 10px rgba(6, 182, 212, 0.6), 0 0 20px rgba(6, 182, 212, 0.3);
+    }
+    .neon-text-amber {
+      text-shadow: 0 0 10px rgba(245, 158, 11, 0.6), 0 0 20px rgba(245, 158, 11, 0.3);
+    }
+    /* 彈窗毛玻璃遮罩 */
+    .modal-backdrop {
+      background: rgba(2, 6, 23, 0.85);
+      backdrop-filter: blur(8px);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between select-none">
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--         頂部 HUD 資訊列                -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-30">
+    <div class="flex items-center space-x-3">
+      <!-- 學生頭像與代號 -->
+      <div id="studentAvatar" class="w-10 h-10 rounded-xl bg-cyan-600 flex items-center justify-center font-mono font-bold text-base shadow-lg shadow-cyan-600/30 border border-cyan-400/40">
+        s--
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="studentIdDisplay" class="font-mono font-bold text-white text-base">s--</span>
+          <span id="playerCodeBadge" class="text-xs px-2 py-0.5 rounded font-mono font-black bg-cyan-950 text-cyan-300 border border-cyan-500/50">
+            A?
+          </span>
+          <span id="groupBadge" class="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+            分配中...
+          </span>
+        </div>
+        <div class="flex items-center gap-2 mt-0.5">
+          <span class="text-[11px] text-slate-400">遊戲三：迷霧探索 × 二進位搶答</span>
+          <span id="coordDisplay" class="text-[10px] font-mono text-slate-500">X: 0, Y: 0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 生命值 HP 與 對決次數 HUD -->
+    <div class="flex items-center flex-wrap gap-4">
+      <!-- HP 條 -->
+      <div class="bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2.5 min-w-[140px]">
+        <span class="text-sm">❤️</span>
+        <div class="flex-1">
+          <div class="flex justify-between text-[11px] font-mono mb-1">
+            <span class="text-slate-400">HP</span>
+            <span id="hpText" class="font-bold text-emerald-400">100 / 100</span>
+          </div>
+          <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div id="hpBar" class="h-full bg-emerald-500 transition-all duration-300 rounded-full" style="width: 100%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 競爭對決進度計數 -->
+      <div class="bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2 min-w-[120px]">
+        <span class="text-sm">⚔️</span>
+        <div>
+          <div class="text-[10px] text-slate-400 uppercase font-semibold">競爭對決</div>
+          <div id="competeCountText" class="text-xs font-mono font-black text-amber-400">0 / 3 次</div>
+        </div>
+      </div>
+
+      <!-- 所屬團隊總分 -->
+      <div class="bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2 min-w-[110px]">
+        <span class="text-sm">🏆</span>
+        <div>
+          <div class="text-[10px] text-slate-400 uppercase font-semibold">小組總分</div>
+          <div id="teamScoreText" class="text-xs font-mono font-black text-cyan-400">0 分</div>
+        </div>
+      </div>
+
+      <!-- 音效與連線 -->
+      <div class="flex items-center gap-2">
+        <button onclick="toggleAudio()" id="audioBtn" class="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-sm" title="切換音效">
+          🔊
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--         主遊戲視窗 (迷霧 Canvas)        -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <main class="flex-1 flex flex-col items-center justify-center p-2 sm:p-4 max-w-6xl mx-auto w-full">
+
+    <!-- 任務提示與控制提醒條 -->
+    <div class="w-full flex items-center justify-between text-xs px-3 py-2 bg-slate-900/60 rounded-xl border border-slate-800/80 mb-2">
+      <div class="flex items-center gap-2 text-slate-300">
+        <span class="text-cyan-400">🧭</span>
+        <span>使用 <kbd class="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-[10px] text-cyan-300 border border-slate-700">W/A/S/D</kbd> 或 <kbd class="px-1.5 py-0.5 bg-slate-800 rounded font-mono text-[10px] text-cyan-300 border border-slate-700">方向鍵</kbd> 在迷霧中探索，遭遇敵方隊員即可觸發對決或合作！</span>
+      </div>
+      <div class="hidden sm:flex items-center gap-2 text-slate-400 text-[11px]">
+        <span>視野半徑：<b class="text-cyan-400 font-mono">130px</b></span>
+        <span>•</span>
+        <span>上限：<b class="text-amber-400 font-mono">每人最多 3 次競爭</b></span>
+      </div>
+    </div>
+
+    <!-- Canvas 畫布舞台 -->
+    <div class="game-canvas-container rounded-2xl overflow-hidden border border-slate-800 w-full max-w-[1000px] flex justify-center bg-slate-950">
+      <canvas id="gameCanvas" width="1000" height="700" class="w-full h-auto max-h-[70vh] aspect-[10/7]"></canvas>
+    </div>
+
+    <!-- 行動裝置 / 觸控專用虛擬方向鍵 (小螢幕時顯示) -->
+    <div class="mt-3 flex sm:hidden items-center justify-center gap-2">
+      <div class="grid grid-cols-3 gap-1.5 w-40">
+        <div></div>
+        <button class="d-btn bg-slate-800 border border-slate-700 rounded-lg p-3 text-center text-lg active:bg-cyan-600" id="btnUp">▲</button>
+        <div></div>
+        <button class="d-btn bg-slate-800 border border-slate-700 rounded-lg p-3 text-center text-lg active:bg-cyan-600" id="btnLeft">◀</button>
+        <button class="d-btn bg-slate-800 border border-slate-700 rounded-lg p-3 text-center text-lg active:bg-cyan-600" id="btnDown">▼</button>
+        <button class="d-btn bg-slate-800 border border-slate-700 rounded-lg p-3 text-center text-lg active:bg-cyan-600" id="btnRight">▶</button>
+      </div>
+    </div>
+
+    <!-- 達成 3 次對決後常駐提示 -->
+    <div id="competeLimitBanner" class="hidden w-full mt-3 p-3 bg-amber-950/40 border border-amber-500/30 rounded-xl text-center text-xs text-amber-200">
+      🎉 <b>您已完成 3 次競爭對決！個人作戰任務達成！</b> 目前處於自由探索模式，請靜待其他組員完賽並觀看前方黑板大螢幕實況！
+    </div>
+
+  </main>
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--    彈窗 1: 遭遇敵方隊員決策對話框    -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <div id="encounterModal" class="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border-2 border-amber-500/50 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl shadow-amber-500/20 text-center animate-fade-in">
+      <div class="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-amber-400 mx-auto flex items-center justify-center text-3xl animate-bounce">
+        ⚠️
+      </div>
+
+      <div class="space-y-1">
+        <h3 class="text-xl font-black text-white tracking-wide">發現敵方隊員！</h3>
+        <p class="text-xs text-slate-400">雙方進入碰撞距離，請在限時內選擇彼此的互動行動：</p>
+      </div>
+
+      <!-- 對手資訊卡 -->
+      <div class="p-3.5 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-left">
+        <div class="flex items-center gap-3">
+          <div id="oppAvatar" class="w-10 h-10 rounded-lg bg-rose-600 flex items-center justify-center font-mono font-bold text-white text-base">
+            B1
+          </div>
+          <div>
+            <div class="flex items-center gap-1.5">
+              <span id="oppIdText" class="font-mono font-bold text-white text-sm">s06</span>
+              <span id="oppCodeText" class="text-xs font-mono font-black text-amber-400">B1</span>
+            </div>
+            <div id="oppGroupText" class="text-xs text-slate-400">第 2 組 (Group B)</div>
+          </div>
+        </div>
+        <div class="text-right">
+          <div class="text-[10px] text-slate-500">對手血量</div>
+          <div id="oppHpText" class="text-xs font-mono font-bold text-emerald-400">100 HP</div>
+        </div>
+      </div>
+
+      <!-- 決策按鈕區 -->
+      <div class="grid grid-cols-2 gap-3 pt-2">
+        <!-- 合作按鈕 -->
+        <button id="btnCooperate" onclick="chooseAction('cooperate')" class="p-3.5 rounded-xl bg-gradient-to-b from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-sm shadow-lg shadow-emerald-700/30 border border-emerald-400/40 transition-all flex flex-col items-center gap-1 cursor-pointer">
+          <span class="text-xl">🤝</span>
+          <span>合作補血</span>
+          <span class="text-[10px] text-emerald-200 font-normal">雙方 HP +20<br>(滿血 100 HP 不加分)</span>
+        </button>
+
+        <!-- 競爭按鈕 -->
+        <button id="btnCompete" onclick="chooseAction('compete')" class="p-3.5 rounded-xl bg-gradient-to-b from-rose-600 to-amber-700 hover:from-rose-500 hover:to-amber-600 text-white font-bold text-sm shadow-lg shadow-rose-700/30 border border-rose-400/40 transition-all flex flex-col items-center gap-1 cursor-pointer">
+          <span class="text-xl">⚔️</span>
+          <span>競爭對決</span>
+          <span class="text-[10px] text-rose-200 font-normal">隨機抽 2 題搶答<br>(勝者 +2 分，扣對手 HP)</span>
+        </button>
+      </div>
+
+      <!-- 等待對手提示 -->
+      <div id="waitingOpponentAction" class="hidden p-3 bg-slate-950/70 border border-slate-800 rounded-xl text-xs text-cyan-300 flex items-center justify-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+        <span id="waitingOpponentText">您已完成選擇，等待對手回應中...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--    彈窗 2: 二進位極速搶答對決面板      -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <div id="quizBattleModal" class="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border-2 border-cyan-500/60 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl shadow-cyan-500/25 animate-fade-in">
+      
+      <!-- 頂部標題與即時計時器 -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">⚔️</span>
+          <div>
+            <h3 class="text-base font-black text-white">二進位極速對決搶答</h3>
+            <p class="text-[11px] text-cyan-300">正確率高且耗時快者勝！獲得 2 分並重創對方！</p>
+          </div>
+        </div>
+
+        <!-- 耗時計時器 -->
+        <div class="bg-slate-950 px-3 py-1 rounded-xl border border-slate-700 text-right">
+          <div class="text-[9px] text-slate-400 uppercase font-semibold">作答耗時</div>
+          <div id="quizTimerText" class="text-xl font-mono font-black text-amber-400">0.0s</div>
+        </div>
+      </div>
+
+      <!-- 伺服器隨機抽出的 2 題作答區 -->
+      <div id="quizQuestionsContainer" class="space-y-4">
+        <!-- 動態渲染題目卡片 -->
+      </div>
+
+      <!-- 提交按鈕與狀態 -->
+      <div class="pt-2">
+        <button id="btnSubmitQuiz" onclick="submitQuizAnswers()" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/30 transition-all flex items-center justify-center gap-2 cursor-pointer">
+          <span>送出答案並結算</span>
+          <span>⚡</span>
+        </button>
+        <div id="quizWaitingOpponent" class="hidden mt-3 p-2.5 bg-slate-950/80 rounded-xl border border-slate-800 text-xs text-center text-cyan-300 flex items-center justify-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+          <span>已交卷！伺服器正等待對手交卷並計算勝負...</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--    彈窗 3: 對決結算畫面 (Battle Result) -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <div id="resultModal" class="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border-2 border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl text-center animate-fade-in" id="resultModalBox">
+      
+      <!-- 結果徽章 -->
+      <div id="resultIcon" class="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-4xl shadow-lg">
+        🏆
+      </div>
+
+      <div class="space-y-1">
+        <h3 id="resultTitle" class="text-2xl font-black text-white">對決大獲全勝！</h3>
+        <p id="resultSubtitle" class="text-xs text-slate-300">為小組成功贏得積分！</p>
+      </div>
+
+      <!-- 得分與 HP 統計卡片 -->
+      <div class="p-3.5 bg-slate-950 border border-slate-800 rounded-xl grid grid-cols-2 gap-3 text-left">
+        <div>
+          <div class="text-[10px] text-slate-400">團隊得分獲得</div>
+          <div id="resultScoreEarned" class="text-2xl font-black font-mono text-cyan-400">+2 分</div>
+        </div>
+        <div>
+          <div class="text-[10px] text-slate-400">自身目前 HP</div>
+          <div id="resultHpRemaining" class="text-2xl font-black font-mono text-emerald-400">100 HP</div>
+        </div>
+      </div>
+
+      <!-- 雙方數據對比 -->
+      <div class="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs space-y-1.5 text-left font-mono">
+        <div class="flex justify-between border-b border-slate-800 pb-1">
+          <span class="text-slate-400">我的數據：</span>
+          <span id="resultMyStats" class="text-cyan-300 font-bold">答對 2/2 題 ｜ 耗時 6.5s</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">對手數據：</span>
+          <span id="resultOppStats" class="text-slate-300">答對 1/2 題 ｜ 耗時 9.2s</span>
+        </div>
+      </div>
+
+      <!-- 題庫解答檢視 -->
+      <div class="text-left space-y-2">
+        <div class="text-[11px] font-bold text-slate-400">📝 題目解答檢討：</div>
+        <div id="resultAnswersReview" class="space-y-1 text-xs font-mono text-slate-300">
+          <!-- 動態插入 -->
+        </div>
+      </div>
+
+      <!-- 返回地圖按鈕 -->
+      <button onclick="closeResultModal()" class="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 transition-all cursor-pointer">
+        返回迷霧地圖繼續探索
+      </button>
+
+    </div>
+  </div>
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--    彈窗 4: 全班遊戲三結束宣布         -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <div id="gameEndModal" class="fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border-2 border-yellow-500/70 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl text-center">
+      <div class="w-16 h-16 rounded-2xl bg-yellow-500/20 border border-yellow-500/50 text-yellow-400 mx-auto flex items-center justify-center text-4xl animate-bounce">
+        🏆
+      </div>
+
+      <div class="space-y-1">
+        <h3 class="text-2xl font-black text-white">遊戲三：迷霧對決正式結束！</h3>
+        <p id="gameEndReason" class="text-xs text-yellow-300">小組全體完成對決！</p>
+      </div>
+
+      <div class="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+        <div class="text-xs font-bold text-slate-400 uppercase">勝利小組宣布</div>
+        <div id="winnerAnnounceBox" class="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+          <div class="text-xs text-yellow-400 font-bold">🥇 冠軍勝利組</div>
+          <div id="winnerGroupName" class="text-xl font-black text-white mt-0.5">第 1 組</div>
+          <div class="text-xs font-mono text-yellow-300 mt-1">二進位總分：<span id="winnerBinaryScore" class="font-bold">--</span></div>
+        </div>
+
+        <div id="runnerUpAnnounceBox" class="p-3 rounded-xl bg-slate-900 border border-slate-700">
+          <div class="text-xs text-slate-400 font-bold">🥈 亞軍小組</div>
+          <div id="runnerUpGroupName" class="text-lg font-bold text-slate-200 mt-0.5">第 2 組</div>
+          <div class="text-xs font-mono text-slate-400 mt-1">二進位總分：<span id="runnerUpBinaryScore" class="font-bold">--</span></div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400">請抬頭觀看前方黑板大螢幕完整戰況與二進位解碼解答！</p>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // 遊戲三客戶端邏輯與迷霧渲染
+    // ==========================================
+    const socket = io();
+
+    // 依 PROMPT_RULES.md 優先讀取座號
+    const urlParams = new URLSearchParams(window.location.search);
+    let myStudentId = localStorage.getItem('studentId') || urlParams.get('id') || 's01';
+    myStudentId = myStudentId.trim().toLowerCase();
+
+    // DOM 元素
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const MAP_WIDTH = 1000;
+    const MAP_HEIGHT = 700;
+    const VISION_RADIUS = 135; // 迷霧視野半徑
+
+    // UI 標籤
+    const studentAvatar = document.getElementById('studentAvatar');
+    const studentIdDisplay = document.getElementById('studentIdDisplay');
+    const playerCodeBadge = document.getElementById('playerCodeBadge');
+    const groupBadge = document.getElementById('groupBadge');
+    const hpText = document.getElementById('hpText');
+    const hpBar = document.getElementById('hpBar');
+    const competeCountText = document.getElementById('competeCountText');
+    const teamScoreText = document.getElementById('teamScoreText');
+    const coordDisplay = document.getElementById('coordDisplay');
+
+    // 狀態變數
+    let myPlayer = null;
+    let allPlayers = {};
+    let currentEncounter = null;
+    let currentBattle = null;
+    let quizTimerInterval = null;
+    let quizStartTime = null;
+
+    // 按鍵狀態監聽
+    const keysDown = {
+      up: false,
+      down: false,
+      left: false,
+      right: false
+    };
+
+    // 初始化連線與向伺服器註冊
+    studentAvatar.innerText = myStudentId.toUpperCase();
+    studentIdDisplay.innerText = myStudentId.toUpperCase();
+
+    socket.emit('student_join', { studentId: myStudentId });
+    socket.emit('stage3_init', { studentId: myStudentId });
+
+    // 接收 Stage3 初始化
+    socket.on('stage3_ready', (data) => {
+      if (data.player) {
+        myPlayer = data.player;
+        updatePlayerHUD();
+      }
+      if (data.allPlayers) {
+        allPlayers = data.allPlayers;
+      }
+      if (data.groupScores && myPlayer) {
+        const myScore = data.groupScores[myPlayer.groupId] || 0;
+        teamScoreText.innerText = `${myScore} 分 (0b${myScore.toString(2)})`;
+      }
+    });
+
+    // 學生端狀態同步
+    socket.on('student_ready', (data) => {
+      if (data.group) {
+        groupBadge.innerText = data.group.name;
+      }
+    });
+
+    // 伺服器廣播學生位置 (上帝視角或全域同步)
+    socket.on('stage3_player_moved', (data) => {
+      if (allPlayers[data.studentId]) {
+        allPlayers[data.studentId].x = data.x;
+        allPlayers[data.studentId].y = data.y;
+      }
+    });
+
+    // 全員同步更新
+    socket.on('stage3_sync_players', (data) => {
+      if (data.players) {
+        allPlayers = data.players;
+        if (data.players[myStudentId]) {
+          myPlayer = data.players[myStudentId];
+          updatePlayerHUD();
+        }
+      }
+      if (data.groupScores && myPlayer) {
+        const myScore = data.groupScores[myPlayer.groupId] || 0;
+        teamScoreText.innerText = `${myScore} 分 (0b${myScore.toString(2)})`;
+      }
+    });
+
+    // 遭遇觸發
+    socket.on('encounter_triggered', (data) => {
+      sound.playTick();
+      currentEncounter = data;
+      showEncounterModal(data);
+    });
+
+    // 對手已送出行動
+    socket.on('opponent_action_waiting', () => {
+      const waitBox = document.getElementById('waitingOpponentAction');
+      const waitText = document.getElementById('waitingOpponentText');
+      waitBox.classList.remove('hidden');
+      waitText.innerText = '對手已完成抉擇！';
+    });
+
+    // 遭遇結果（雙方皆合作補血）
+    socket.on('encounter_result', (data) => {
+      document.getElementById('encounterModal').classList.add('hidden');
+      if (data.hp !== undefined && myPlayer) {
+        myPlayer.hp = data.hp;
+        updatePlayerHUD();
+      }
+      sound.playVictory();
+      alert(`【互動結果】\n${data.message}`);
+      currentEncounter = null;
+    });
+
+    // 開始二進位搶答對決
+    socket.on('start_quiz_battle', (data) => {
+      document.getElementById('encounterModal').classList.add('hidden');
+      currentBattle = data;
+      showQuizBattleModal(data);
+    });
+
+    // 對手已提交答案
+    socket.on('opponent_quiz_submitted', () => {
+      const waitBox = document.getElementById('quizWaitingOpponent');
+      waitBox.classList.remove('hidden');
+      waitBox.innerHTML = '<span class="text-amber-400 font-bold">⚡ 對手已完成答題並交卷！</span> 正在核對成績...';
+    });
+
+    // 對決勝負結算
+    socket.on('battle_result', (data) => {
+      showBattleResultModal(data);
+    });
+
+    // 遊戲三結束
+    socket.on('game_3_ended', (data) => {
+      sound.playVictory();
+      showGameEndModal(data);
+    });
+
+    // 接收重置廣播
+    socket.on('game_reset', () => {
+      socket.emit('stage3_init', { studentId: myStudentId });
+    });
+
+    // ==========================================
+    // 更新玩家狀態 HUD
+    // ==========================================
+    function updatePlayerHUD() {
+      if (!myPlayer) return;
+
+      studentAvatar.innerText = myPlayer.id.toUpperCase();
+      studentIdDisplay.innerText = myPlayer.id.toUpperCase();
+      playerCodeBadge.innerText = myPlayer.code;
+      playerCodeBadge.style.color = myPlayer.color || '#38bdf8';
+      playerCodeBadge.style.borderColor = myPlayer.color || '#38bdf8';
+
+      hpText.innerText = `${myPlayer.hp} / 100`;
+      hpBar.style.width = `${Math.max(0, Math.min(100, myPlayer.hp))}%`;
+      if (myPlayer.hp > 60) {
+        hpBar.className = 'h-full bg-emerald-500 transition-all duration-300 rounded-full';
+        hpText.className = 'font-bold text-emerald-400';
+      } else if (myPlayer.hp > 30) {
+        hpBar.className = 'h-full bg-amber-500 transition-all duration-300 rounded-full';
+        hpText.className = 'font-bold text-amber-400';
+      } else {
+        hpBar.className = 'h-full bg-rose-500 transition-all duration-300 rounded-full';
+        hpText.className = 'font-bold text-rose-400';
+      }
+
+      competeCountText.innerText = `${myPlayer.competeCount} / 3 次`;
+      if (myPlayer.competeCount >= 3) {
+        competeCountText.className = 'text-xs font-mono font-black text-emerald-400';
+        document.getElementById('competeLimitBanner').classList.remove('hidden');
+      }
+
+      coordDisplay.innerText = `X: ${Math.round(myPlayer.x)}, Y: ${Math.round(myPlayer.y)}`;
+    }
+
+    // ==========================================
+    // 鍵盤移動與操控邏輯
+    // ==========================================
+    window.addEventListener('keydown', (e) => {
+      // 若在輸入答案或開彈窗，不移動
+      if (!document.getElementById('encounterModal').classList.contains('hidden') ||
+          !document.getElementById('quizBattleModal').classList.contains('hidden') ||
+          !document.getElementById('resultModal').classList.contains('hidden')) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case 'w':
+        case 'arrowup':
+          keysDown.up = true;
+          break;
+        case 's':
+        case 'arrowdown':
+          keysDown.down = true;
+          break;
+        case 'a':
+        case 'arrowleft':
+          keysDown.left = true;
+          break;
+        case 'd':
+        case 'arrowright':
+          keysDown.right = true;
+          break;
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      switch (e.key.toLowerCase()) {
+        case 'w':
+        case 'arrowup':
+          keysDown.up = false;
+          break;
+        case 's':
+        case 'arrowdown':
+          keysDown.down = false;
+          break;
+        case 'a':
+        case 'arrowleft':
+          keysDown.left = false;
+          break;
+        case 'd':
+        case 'arrowright':
+          keysDown.right = false;
+          break;
+      }
+    });
+
+    // 觸控虛擬方向鍵
+    function setupTouchBtn(id, dirKey) {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('touchstart', (e) => { e.preventDefault(); keysDown[dirKey] = true; });
+      btn.addEventListener('touchend',   (e) => { e.preventDefault(); keysDown[dirKey] = false; });
+      btn.addEventListener('mousedown',  () => { keysDown[dirKey] = true; });
+      btn.addEventListener('mouseup',    () => { keysDown[dirKey] = false; });
+      btn.addEventListener('mouseleave', () => { keysDown[dirKey] = false; });
+    }
+    setupTouchBtn('btnUp', 'up');
+    setupTouchBtn('btnDown', 'down');
+    setupTouchBtn('btnLeft', 'left');
+    setupTouchBtn('btnRight', 'right');
+
+    // 物理移動更新 (每幀執行)
+    let lastMoveSent = 0;
+    function updateMovement() {
+      if (!myPlayer) return;
+      if (!document.getElementById('encounterModal').classList.contains('hidden') ||
+          !document.getElementById('quizBattleModal').classList.contains('hidden') ||
+          !document.getElementById('resultModal').classList.contains('hidden')) {
+        return;
+      }
+
+      const speed = 3.6;
+      let dx = 0;
+      let dy = 0;
+
+      if (keysDown.up) dy -= speed;
+      if (keysDown.down) dy += speed;
+      if (keysDown.left) dx -= speed;
+      if (keysDown.right) dx += speed;
+
+      if (dx !== 0 && dy !== 0) {
+        dx *= 0.7071;
+        dy *= 0.7071;
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        myPlayer.x = Math.max(25, Math.min(MAP_WIDTH - 25, myPlayer.x + dx));
+        myPlayer.y = Math.max(25, Math.min(MAP_HEIGHT - 25, myPlayer.y + dy));
+        coordDisplay.innerText = `X: ${Math.round(myPlayer.x)}, Y: ${Math.round(myPlayer.y)}`;
+
+        // 發送位置至伺服器 (節流 45ms)
+        const now = Date.now();
+        if (now - lastMoveSent > 45) {
+          lastMoveSent = now;
+          socket.emit('player_move', {
+            studentId: myPlayer.id,
+            x: myPlayer.x,
+            y: myPlayer.y
+          });
+        }
+      }
+    }
+
+    // ==========================================
+    // Canvas 迷霧與遊戲世界繪製循環 (Render Loop)
+    // ==========================================
+    function render() {
+      updateMovement();
+
+      // 清空畫布
+      ctx.clearRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+
+      // 1. 繪製地圖底層：科技網格背景
+      ctx.fillStyle = '#050b14';
+      ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+
+      // 格線
+      ctx.strokeStyle = 'rgba(30, 41, 59, 0.45)';
+      ctx.lineWidth = 1;
+      const gridSize = 50;
+      for (let x = 0; x < MAP_WIDTH; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, MAP_HEIGHT);
+        ctx.stroke();
+      }
+      for (let y = 0; y < MAP_HEIGHT; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(MAP_WIDTH, y);
+        ctx.stroke();
+      }
+
+      // 地圖邊界警示線
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.35)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(10, 10, MAP_WIDTH - 20, MAP_HEIGHT - 20);
+
+      // 繪製科技角落裝飾
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
+      ctx.fillRect(15, 15, 40, 4);
+      ctx.fillRect(15, 15, 4, 40);
+      ctx.fillRect(MAP_WIDTH - 55, 15, 40, 4);
+      ctx.fillRect(MAP_WIDTH - 19, 15, 4, 40);
+      ctx.fillRect(15, MAP_HEIGHT - 19, 40, 4);
+      ctx.fillRect(15, MAP_HEIGHT - 55, 4, 40);
+      ctx.fillRect(MAP_WIDTH - 55, MAP_HEIGHT - 19, 40, 4);
+      ctx.fillRect(MAP_WIDTH - 19, MAP_HEIGHT - 55, 4, 40);
+
+      // 2. 繪製所有在場玩家 (若進入自己的視野半徑才看得到)
+      const playerList = Object.values(allPlayers);
+      playerList.forEach(p => {
+        if (!myPlayer) return;
+        if (p.id === myPlayer.id) return; // 自己的角色稍後單獨繪製
+
+        const dist = Math.hypot(p.x - myPlayer.x, p.y - myPlayer.y);
+        // 若在視野範圍內，繪製對手/隊友
+        if (dist <= VISION_RADIUS + 25) {
+          const isTeammate = p.groupId === myPlayer.groupId;
+          drawPlayerToken(p, isTeammate);
+        }
+      });
+
+      // 3. 繪製迷霧遮罩 (Fog of War)
+      // 使用 destination-out 在黑色遮罩上挖出圓形透明區域
+      if (myPlayer) {
+        ctx.save();
+        // 覆蓋一層全黑迷霧
+        ctx.fillStyle = '#020617';
+        ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+
+        // 挖出圓形視野
+        ctx.globalCompositeOperation = 'destination-out';
+        const grad = ctx.createRadialGradient(myPlayer.x, myPlayer.y, VISION_RADIUS * 0.7, myPlayer.x, myPlayer.y, VISION_RADIUS);
+        grad.addColorStop(0, 'rgba(0, 0, 0, 1)');
+        grad.addColorStop(0.8, 'rgba(0, 0, 0, 0.9)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(myPlayer.x, myPlayer.y, VISION_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 視野邊緣微微微光
+        ctx.save();
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.25)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 6]);
+        ctx.beginPath();
+        ctx.arc(myPlayer.x, myPlayer.y, VISION_RADIUS, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 4. 繪製自己的角色 Token
+      if (myPlayer) {
+        drawMyPlayerToken(myPlayer);
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    // 繪製其他玩家角色
+    function drawPlayerToken(p, isTeammate) {
+      ctx.save();
+      const color = isTeammate ? '#10b981' : (p.color || '#f43f5e');
+
+      // 外圈光暈
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 17, 0, Math.PI * 2);
+      ctx.fillStyle = isTeammate ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)';
+      ctx.fill();
+
+      // 本體圓點
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 13, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // 代號文字 (例如 A1, B2)
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.code || p.id, p.x, p.y);
+
+      // 頭頂 HP 條
+      const barW = 28;
+      const barH = 3.5;
+      const hpRatio = Math.max(0, Math.min(100, p.hp)) / 100;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+      ctx.fillRect(p.x - barW / 2, p.y - 24, barW, barH);
+      ctx.fillStyle = isTeammate ? '#34d399' : (hpRatio > 0.5 ? '#38bdf8' : '#fb7185');
+      ctx.fillRect(p.x - barW / 2, p.y - 24, barW * hpRatio, barH);
+
+      // 隊友標籤
+      if (isTeammate) {
+        ctx.font = '9px sans-serif';
+        ctx.fillStyle = '#34d399';
+        ctx.fillText('隊友', p.x, p.y + 24);
+      } else {
+        ctx.font = '9px sans-serif';
+        ctx.fillStyle = '#f87171';
+        ctx.fillText(p.id, p.x, p.y + 24);
+      }
+
+      ctx.restore();
+    }
+
+    // 繪製自己角色
+    function drawMyPlayerToken(p) {
+      ctx.save();
+      // 外發光脈衝波
+      const pulse = (Date.now() % 1500) / 1500;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 16 + pulse * 10, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(6, 182, 212, ${0.8 - pulse * 0.8})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // 角色核心球體
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
+      ctx.fillStyle = p.color || '#06b6d4';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // 自身標號代碼
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.code || 'ME', p.x, p.y);
+
+      // 「我」標籤
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText('★ 我', p.x, p.y + 25);
+
+      ctx.restore();
+    }
+
+    // 啟動渲染循環
+    requestAnimationFrame(render);
+
+    // ==========================================
+    // 遭遇彈窗邏輯
+    // ==========================================
+    function showEncounterModal(data) {
+      const modal = document.getElementById('encounterModal');
+      const opp = data.opponent;
+
+      document.getElementById('oppAvatar').innerText = opp.code || opp.id.toUpperCase();
+      document.getElementById('oppAvatar').style.backgroundColor = opp.color || '#f43f5e';
+      document.getElementById('oppIdText').innerText = opp.id;
+      document.getElementById('oppCodeText').innerText = opp.code || '';
+      document.getElementById('oppGroupText').innerText = opp.groupName || opp.groupId;
+      document.getElementById('oppHpText').innerText = `${opp.hp} HP`;
+
+      document.getElementById('btnCooperate').disabled = false;
+      document.getElementById('btnCompete').disabled = false;
+      document.getElementById('waitingOpponentAction').classList.add('hidden');
+
+      modal.classList.remove('hidden');
+    }
+
+    function chooseAction(action) {
+      sound.playKey();
+      document.getElementById('btnCooperate').disabled = true;
+      document.getElementById('btnCompete').disabled = true;
+
+      const waitBox = document.getElementById('waitingOpponentAction');
+      const waitText = document.getElementById('waitingOpponentText');
+      waitBox.classList.remove('hidden');
+      waitText.innerText = action === 'cooperate' ? '您選擇了 [🤝 合作]，等待對手回應...' : '您選擇了 [⚔️ 競爭]，準備展開二進位搶答！';
+
+      socket.emit('submit_action', {
+        encounterId: currentEncounter.encounterId,
+        studentId: myStudentId,
+        action: action
+      });
+    }
+
+    // ==========================================
+    // 二進位搶答對決彈窗邏輯
+    // ==========================================
+    function showQuizBattleModal(data) {
+      const modal = document.getElementById('quizBattleModal');
+      const container = document.getElementById('quizQuestionsContainer');
+      container.innerHTML = '';
+
+      document.getElementById('quizWaitingOpponent').classList.add('hidden');
+      document.getElementById('btnSubmitQuiz').disabled = false;
+      document.getElementById('btnSubmitQuiz').innerText = '送出答案並結算 ⚡';
+
+      // 渲染伺服器隨機抽出的 2 題
+      data.questions.forEach((q, idx) => {
+        const card = document.createElement('div');
+        card.className = 'p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2';
+
+        const qTitle = q.type === 'bin2dec'
+          ? `第 ${idx + 1} 題：將二進位 <span class="font-mono text-cyan-300 font-bold text-base px-1">${q.question}</span> 轉換為十進位：`
+          : `第 ${idx + 1} 題：將十進位 <span class="font-mono text-amber-300 font-bold text-base px-1">${q.question}</span> 轉換為二進位：`;
+
+        card.innerHTML = `
+          <div class="text-xs font-semibold text-slate-300">${qTitle}</div>
+          <div class="relative">
+            <input 
+              type="text" 
+              id="quiz_ans_${q.id}" 
+              placeholder="${q.type === 'bin2dec' ? '例如: 42' : '例如: 101010'}" 
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-base font-mono text-cyan-300 focus:outline-none focus:border-cyan-400"
+              autocomplete="off"
+            >
+          </div>
+        `;
+        container.appendChild(card);
+      });
+
+      modal.classList.remove('hidden');
+
+      // 啟動作答計時器
+      quizStartTime = Date.now();
+      const timerEl = document.getElementById('quizTimerText');
+      clearInterval(quizTimerInterval);
+      quizTimerInterval = setInterval(() => {
+        const elapsed = (Date.now() - quizStartTime) / 1000;
+        timerEl.innerText = `${elapsed.toFixed(1)}s`;
+      }, 100);
+
+      // 自動聚焦第 1 題
+      setTimeout(() => {
+        const firstInput = container.querySelector('input');
+        if (firstInput) firstInput.focus();
+      }, 200);
+    }
+
+    function submitQuizAnswers() {
+      if (!currentBattle) return;
+      sound.playKey();
+
+      clearInterval(quizTimerInterval);
+      const timeTaken = parseFloat(((Date.now() - quizStartTime) / 1000).toFixed(1));
+
+      const answers = {};
+      currentBattle.questions.forEach(q => {
+        const input = document.getElementById(`quiz_ans_${q.id}`);
+        answers[q.id] = input ? input.value.trim() : '';
+      });
+
+      document.getElementById('btnSubmitQuiz').disabled = true;
+      document.getElementById('btnSubmitQuiz').innerText = '已送出，伺服器核對中...';
+      document.getElementById('quizWaitingOpponent').classList.remove('hidden');
+
+      socket.emit('submit_quiz_answer', {
+        battleId: currentBattle.battleId,
+        studentId: myStudentId,
+        answers: answers,
+        timeTaken: timeTaken
+      });
+    }
+
+    // ==========================================
+    // 對決結算彈窗邏輯
+    // ==========================================
+    function showBattleResultModal(data) {
+      document.getElementById('quizBattleModal').classList.add('hidden');
+      const modal = document.getElementById('resultModal');
+      const box = document.getElementById('resultModalBox');
+      const icon = document.getElementById('resultIcon');
+      const title = document.getElementById('resultTitle');
+      const subtitle = document.getElementById('resultSubtitle');
+
+      if (data.isWinner) {
+        sound.playVictory();
+        icon.innerText = '🏆';
+        icon.className = 'w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-4xl shadow-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-bounce';
+        title.innerText = '對決大獲全勝！';
+        title.className = 'text-2xl font-black text-emerald-400';
+        subtitle.innerText = '速度與正確率壓制對手，成功為小組貢獻分數！';
+        box.className = 'bg-slate-900 border-2 border-emerald-500/60 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl';
+      } else if (data.isDraw) {
+        icon.innerText = '⚖️';
+        icon.className = 'w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-4xl shadow-lg bg-amber-500/20 text-amber-400 border border-amber-500/40';
+        title.innerText = '雙方實力相當，平手！';
+        title.className = 'text-2xl font-black text-amber-400';
+        subtitle.innerText = '兩位解題表現難分軒輊！';
+        box.className = 'bg-slate-900 border-2 border-amber-500/60 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl';
+      } else {
+        sound.playError();
+        icon.innerText = '💥';
+        icon.className = 'w-16 h-16 rounded-2xl mx-auto flex items-center justify-center text-4xl shadow-lg bg-rose-500/20 text-rose-400 border border-rose-500/40';
+        title.innerText = '對決惜敗！';
+        title.className = 'text-2xl font-black text-rose-400';
+        subtitle.innerText = `受到對手重創，損失了 ${data.hpLoss || 15} HP！`;
+        box.className = 'bg-slate-900 border-2 border-rose-500/60 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl';
+      }
+
+      document.getElementById('resultScoreEarned').innerText = `+${data.earnedScore} 分`;
+      document.getElementById('resultHpRemaining').innerText = `${data.myHp} HP`;
+      document.getElementById('resultMyStats').innerText = `答對 ${data.myCorrect}/2 題 ｜ 耗時 ${data.myTime}s`;
+      document.getElementById('resultOppStats').innerText = `答對 ${data.opponentCorrect}/2 題 ｜ 耗時 ${data.opponentTime}s`;
+
+      // 答案回顧
+      const revContainer = document.getElementById('resultAnswersReview');
+      revContainer.innerHTML = '';
+      if (data.questions) {
+        data.questions.forEach((q, i) => {
+          const div = document.createElement('div');
+          div.className = 'p-2 rounded bg-slate-900 border border-slate-800 flex justify-between';
+          div.innerHTML = `
+            <span>第 ${i + 1} 題 (${q.type === 'bin2dec' ? '二進位轉十進位' : '十進位轉二進位'}): <b class="text-white">${q.question}</b></span>
+            <span class="text-emerald-400 font-bold">解答: ${q.answer}</span>
+          `;
+          revContainer.appendChild(div);
+        });
+      }
+
+      if (myPlayer) {
+        myPlayer.hp = data.myHp;
+        myPlayer.competeCount = data.myCompeteCount;
+        updatePlayerHUD();
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeResultModal() {
+      document.getElementById('resultModal').classList.add('hidden');
+      currentBattle = null;
+      currentEncounter = null;
+    }
+
+    // ==========================================
+    // 遊戲結束彈窗邏輯
+    // ==========================================
+    function showGameEndModal(data) {
+      const modal = document.getElementById('gameEndModal');
+      document.getElementById('gameEndReason').innerText = data.reason || '比賽結束！';
+
+      if (data.winner) {
+        document.getElementById('winnerGroupName').innerText = data.winner.name;
+        document.getElementById('winnerBinaryScore').innerText = `${data.winner.binaryScore} (十進位: ${data.winner.score}分)`;
+      }
+      if (data.runnerUp) {
+        document.getElementById('runnerUpGroupName').innerText = data.runnerUp.name;
+        document.getElementById('runnerUpBinaryScore').innerText = `${data.runnerUp.binaryScore} (十進位: ${data.runnerUp.score}分)`;
+      } else {
+        document.getElementById('runnerUpAnnounceBox').classList.add('hidden');
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    // 音效開關
+    function toggleAudio() {
+      sound.enabled = !sound.enabled;
+      const btn = document.getElementById('audioBtn');
+      btn.innerText = sound.enabled ? '🔊' : '🔇';
+    }
+  </script>
+</body>
+</html>

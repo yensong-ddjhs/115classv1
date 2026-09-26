@@ -351,6 +351,18 @@ function updateGameStageBtns() {
     }
   });
 
+  // 切換大螢幕視圖：遊戲三上帝視角 VS 遊戲一/二小組卡片
+  const groupsContainer = document.getElementById('groupsContainer');
+  const stage3Section = document.getElementById('stage3Section');
+  if (selectedGame === 3) {
+    if (groupsContainer) groupsContainer.classList.add('hidden');
+    if (stage3Section) stage3Section.classList.remove('hidden');
+    initTeacherStage3();
+  } else {
+    if (groupsContainer) groupsContainer.classList.remove('hidden');
+    if (stage3Section) stage3Section.classList.add('hidden');
+  }
+
   // 同步更新開始按鈕文字
   const startBtn = document.getElementById('startGameBtn');
   if (startBtn && currentGameState && currentGameState.status !== 'in_progress') {
@@ -398,3 +410,395 @@ function toggleAudio() {
   const btn = document.getElementById('audioBtn');
   btn.innerText = sound.enabled ? '🔊' : '🔇';
 }
+
+// ====================================================
+// 遊戲三 (迷霧探索與二進位對決) 教師端上帝視角 (God Mode)
+// ====================================================
+let teacherStage3Inited = false;
+let teacherStage3AnimRunning = false;
+let stage3Players = {};
+let stage3Scores = {};
+let stage3ActiveEffects = []; // [{ p1, p2, type: 'encounter'|'battle', expire }]
+
+const T_MAP_WIDTH = 1000;
+const T_MAP_HEIGHT = 700;
+
+const GROUP_BASE_COLORS = {
+  group_1: { name: '第 1 組 (A)', code: 'A', color: '#06b6d4', spawn: { x: 180, y: 180 } },
+  group_2: { name: '第 2 組 (B)', code: 'B', color: '#f59e0b', spawn: { x: 820, y: 180 } },
+  group_3: { name: '第 3 組 (C)', code: 'C', color: '#10b981', spawn: { x: 180, y: 520 } },
+  group_4: { name: '第 4 組 (D)', code: 'D', color: '#8b5cf6', spawn: { x: 820, y: 520 } },
+  group_5: { name: '第 5 組 (E)', code: 'E', color: '#f43f5e', spawn: { x: 500, y: 180 } },
+  group_6: { name: '第 6 組 (F)', code: 'F', color: '#ec4899', spawn: { x: 500, y: 520 } }
+};
+
+function initTeacherStage3() {
+  if (teacherStage3Inited) {
+    renderStage3Scores();
+    return;
+  }
+  teacherStage3Inited = true;
+
+  // 向伺服器索取初始 stage3 狀態
+  socket.emit('teacher_stage3_get_state', (res) => {
+    if (res && res.players) {
+      stage3Players = res.players;
+      stage3Scores = res.scores || {};
+      renderStage3Scores();
+    }
+  });
+
+  if (!teacherStage3AnimRunning) {
+    teacherStage3AnimRunning = true;
+    requestAnimationFrame(renderTeacherCanvasLoop);
+  }
+}
+
+// 學生位置更新
+socket.on('stage3_player_moved', (data) => {
+  if (stage3Players[data.studentId]) {
+    stage3Players[data.studentId].x = data.x;
+    stage3Players[data.studentId].y = data.y;
+  }
+});
+
+// 全體 stage3 狀態同步
+socket.on('stage3_sync_players', (data) => {
+  if (data.players) {
+    stage3Players = data.players;
+  }
+  if (data.groupScores) {
+    stage3Scores = data.groupScores;
+  }
+  renderStage3Scores();
+});
+
+// 遭遇碰撞光環特效
+socket.on('stage3_encounter_active', (data) => {
+  stage3ActiveEffects.push({
+    p1: data.p1,
+    p2: data.p2,
+    type: 'encounter',
+    expire: Date.now() + 6000
+  });
+});
+
+// 對決展開特效
+socket.on('stage3_battle_started', (data) => {
+  stage3ActiveEffects.push({
+    p1: data.p1,
+    p2: data.p2,
+    type: 'battle',
+    expire: Date.now() + 10000
+  });
+});
+
+// 即時動態戰況 Logs 訊息
+socket.on('stage3_log', (data) => {
+  const container = document.getElementById('stage3LogsContainer');
+  if (!container) return;
+
+  const row = document.createElement('div');
+  row.className = 'py-1 border-b border-slate-900/60 flex items-start gap-1.5 animate-fade-in';
+  row.innerHTML = `
+    <span class="text-slate-500 font-mono text-[10px] shrink-0">[${data.time}]</span>
+    <span class="text-slate-200 text-xs">${data.text}</span>
+  `;
+
+  // 若目前只有一條提示文字，先清空
+  if (container.children.length === 1 && container.children[0].classList.contains('italic')) {
+    container.innerHTML = '';
+  }
+
+  container.appendChild(row);
+  container.scrollTop = container.scrollHeight;
+});
+
+// 遊戲三結束廣播
+socket.on('game_3_ended', (data) => {
+  sound.playVictory();
+  showTeacherVictoryModal(data);
+});
+
+// 繪製上帝視角畫布主循環
+function renderTeacherCanvasLoop() {
+  const canvas = document.getElementById('teacherCanvas');
+  if (!canvas) {
+    requestAnimationFrame(renderTeacherCanvasLoop);
+    return;
+  }
+  const ctx = canvas.getContext('2d');
+
+  // 清空畫布
+  ctx.clearRect(0, 0, T_MAP_WIDTH, T_MAP_HEIGHT);
+
+  // 1. 繪製科技網格底圖 (上帝視角無迷霧，清楚投影)
+  ctx.fillStyle = '#050b14';
+  ctx.fillRect(0, 0, T_MAP_WIDTH, T_MAP_HEIGHT);
+
+  // 網格線
+  ctx.strokeStyle = 'rgba(30, 41, 59, 0.5)';
+  ctx.lineWidth = 1;
+  const gridSize = 50;
+  for (let x = 0; x < T_MAP_WIDTH; x += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, T_MAP_HEIGHT);
+    ctx.stroke();
+  }
+  for (let y = 0; y < T_MAP_HEIGHT; y += gridSize) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(T_MAP_WIDTH, y);
+    ctx.stroke();
+  }
+
+  // 2. 繪製各組基地標記 (Spawn Areas)
+  Object.keys(GROUP_BASE_COLORS).forEach(gId => {
+    const info = GROUP_BASE_COLORS[gId];
+    ctx.save();
+    ctx.fillStyle = info.color + '15';
+    ctx.strokeStyle = info.color + '55';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(info.spawn.x, info.spawn.y, 65, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = info.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${info.name} 基地`, info.spawn.x, info.spawn.y - 45);
+    ctx.restore();
+  });
+
+  // 3. 繪製遭遇與對決連線動態特效
+  const now = Date.now();
+  stage3ActiveEffects = stage3ActiveEffects.filter(eff => eff.expire > now);
+  stage3ActiveEffects.forEach(eff => {
+    const p1 = stage3Players[eff.p1];
+    const p2 = stage3Players[eff.p2];
+    if (p1 && p2) {
+      ctx.save();
+      const pulse = (now % 1000) / 1000;
+      if (eff.type === 'battle') {
+        // 對決：雙刀紅光交鋒線
+        ctx.strokeStyle = `rgba(244, 63, 94, ${0.4 + pulse * 0.5})`;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        // 中點交戰圖示
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+        ctx.font = '18px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚔️', midX, midY);
+      } else {
+        // 遭遇：黃金警戒連結
+        ctx.strokeStyle = `rgba(245, 158, 11, ${0.4 + pulse * 0.5})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2;
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚠️', midX, midY);
+      }
+      ctx.restore();
+    }
+  });
+
+  // 4. 繪製全班 30 位學生角色 Token
+  const playerList = Object.values(stage3Players);
+  playerList.forEach(p => {
+    ctx.save();
+
+    // 依組別顏色繪製外發光圓圈
+    const color = p.color || (GROUP_BASE_COLORS[p.groupId]?.color || '#06b6d4');
+
+    // 外光暈
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 16, 0, Math.PI * 2);
+    ctx.fillStyle = color + '33';
+    ctx.fill();
+
+    // 圓點核心
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 學生代碼 (例如 A1, B2)
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.code || p.id, p.x, p.y);
+
+    // 頭頂 HP 生命條
+    const barW = 26;
+    const barH = 3;
+    const hpRatio = Math.max(0, Math.min(100, p.hp)) / 100;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+    ctx.fillRect(p.x - barW / 2, p.y - 20, barW, barH);
+    ctx.fillStyle = hpRatio > 0.5 ? '#34d399' : '#f87171';
+    ctx.fillRect(p.x - barW / 2, p.y - 20, barW * hpRatio, barH);
+
+    // 底部文字標籤：學號 + 對決次數 (如 s01 [2/3])
+    ctx.font = '9px sans-serif';
+    ctx.fillStyle = p.competeCount >= 3 ? '#34d399' : '#cbd5e1';
+    const tag = `${p.id} (${p.competeCount}/3)`;
+    ctx.fillText(tag, p.x, p.y + 20);
+
+    ctx.restore();
+  });
+
+  requestAnimationFrame(renderTeacherCanvasLoop);
+}
+
+// 渲染右側各組二進位積分板
+function renderStage3Scores() {
+  const container = document.getElementById('stage3GroupScoresList');
+  if (!container || !currentGameState || !currentGameState.groups) return;
+
+  container.innerHTML = '';
+  const groupKeys = Object.keys(currentGameState.groups);
+
+  groupKeys.forEach((gId, idx) => {
+    const group = currentGameState.groups[gId];
+    const score = group.score || 0;
+    const binaryStr = score.toString(2);
+    const meta = GROUP_BASE_COLORS[gId] || { name: group.name, color: '#38bdf8' };
+
+    // 計算組員完成度 (幾位完成 3 次)
+    const members = group.members || [];
+    let completedMembers = 0;
+    members.forEach(mId => {
+      const p = stage3Players[mId];
+      if (p && p.competeCount >= 3) completedMembers++;
+    });
+
+    const isFinished = members.length > 0 && completedMembers === members.length;
+
+    const card = document.createElement('div');
+    card.className = `p-3 rounded-xl border transition-all ${
+      isFinished 
+        ? 'bg-emerald-950/30 border-emerald-500/50' 
+        : 'bg-slate-950 border-slate-800'
+    }`;
+
+    card.innerHTML = `
+      <div class="flex items-center justify-between mb-1.5">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${meta.color}"></span>
+          <span class="font-bold text-xs text-white">${meta.name}</span>
+          ${isFinished ? '<span class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">全體完賽</span>' : ''}
+        </div>
+        <div class="text-[10px] font-mono text-slate-400">
+          組員對決進度：<b class="${completedMembers === members.length ? 'text-emerald-400' : 'text-amber-400'}">${completedMembers}/${members.length}</b> 人完成
+        </div>
+      </div>
+      <div class="flex items-center justify-between bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800">
+        <div>
+          <div class="text-[9px] text-slate-400 uppercase font-mono">二進位即時總分</div>
+          <div class="font-mono text-lg font-black text-cyan-300 tracking-wider">${binaryStr}</div>
+        </div>
+        <div class="text-right">
+          <span class="text-[10px] text-slate-400 block">十進位解答</span>
+          <span class="font-mono font-bold text-sm text-yellow-400 ${showAllAnswers ? '' : 'hidden'}" id="s3_dec_${gId}">
+            ${score} 分
+          </span>
+          <button onclick="toggleSingleAnswer('s3_dec_${gId}')" class="text-[10px] text-cyan-400 hover:text-cyan-300 underline block ${showAllAnswers ? 'hidden' : ''}">
+            點擊查看
+          </button>
+        </div>
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+}
+
+function toggleSingleAnswer(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.classList.toggle('hidden');
+  }
+}
+
+// 教師模擬隨機對決
+function simulateGame3Battle() {
+  sound.playScoreGained();
+  socket.emit('teacher_simulate_game3_battle');
+}
+
+// 教師手動結束遊戲三
+function endGame3Manual() {
+  if (confirm('確定要提前結算「遊戲三：迷霧對決」並宣布勝利小組嗎？')) {
+    sound.playVictory();
+    socket.emit('teacher_end_game3');
+  }
+}
+
+// 教師勝利大彈窗顯示
+function showTeacherVictoryModal(data) {
+  const modal = document.getElementById('teacherVictoryModal');
+  document.getElementById('tvmReason').innerText = data.reason || '競賽達成結算條件！';
+
+  if (data.winner) {
+    document.getElementById('tvmWinnerName').innerText = data.winner.name;
+    document.getElementById('tvmWinnerBinary').innerText = data.winner.binaryScore;
+    document.getElementById('tvmWinnerDecimal').innerText = `${data.winner.score} 分`;
+  }
+  if (data.runnerUp) {
+    document.getElementById('tvmRunnerUpName').innerText = data.runnerUp.name;
+    document.getElementById('tvmRunnerUpBinary').innerText = data.runnerUp.binaryScore;
+    document.getElementById('tvmRunnerUpDecimal').innerText = `${data.runnerUp.score} 分`;
+  }
+
+  // 排行清單
+  const list = document.getElementById('tvmRankingsList');
+  list.innerHTML = '';
+  if (data.rankings) {
+    data.rankings.forEach((g, idx) => {
+      const row = document.createElement('div');
+      row.className = 'flex justify-between items-center py-1 border-b border-slate-900';
+      row.innerHTML = `
+        <span class="${idx === 0 ? 'text-yellow-400 font-bold' : (idx === 1 ? 'text-slate-300 font-bold' : 'text-slate-400')}">
+          第 ${idx + 1} 名：${g.name}
+        </span>
+        <div class="flex items-center gap-3">
+          <span class="text-cyan-400 font-mono font-bold">二進位: ${g.binaryScore}</span>
+          <span class="text-slate-500 font-mono text-[11px]">(十進位: ${g.score}分)</span>
+        </div>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function toggleModalDecimal(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+}
+
+function closeTeacherVictoryModal() {
+  document.getElementById('teacherVictoryModal').classList.add('hidden');
+}
+
