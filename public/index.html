@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>即時分組闖關 × 二進位解碼 | 課堂互動系統</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col min-h-screen">
+  <!-- 頂部導覽列 -->
+  <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-bold text-xl shadow-lg shadow-cyan-500/20">
+        01
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-wide tech-font text-white flex items-center gap-2">
+          CLASS BINARY ARENA
+          <span class="text-xs font-normal px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">二進位闖關</span>
+        </h1>
+        <p class="text-xs text-slate-400">分組闖關 × 二進位轉換 × 電腦硬體知識競賽</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+        伺服器正常運作中
+      </span>
+    </div>
+  </header>
+
+  <!-- 主內容區 -->
+  <main class="flex-1 flex items-center justify-center p-4 sm:p-8">
+
+    <!-- 登入面版（預設顯示） -->
+    <div id="loginPanel" class="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl shadow-2xl p-6 sm:p-8 backdrop-blur">
+      
+      <!-- 登入身份切換 Tab -->
+      <div class="flex rounded-xl bg-slate-950 p-1.5 border border-slate-800 mb-6">
+        <button id="tabStudent" onclick="switchTab('student')" class="flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-white bg-cyan-600 shadow-md">
+          🎓 學生登入
+        </button>
+        <button id="tabTeacher" onclick="switchTab('teacher')" class="flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all text-slate-400 hover:text-slate-200">
+          🧑‍🏫 教師控制台
+        </button>
+      </div>
+
+      <!-- 學生登入面版 -->
+      <div id="studentPanel" class="space-y-5">
+        <div class="text-center space-y-1">
+          <h2 class="text-xl font-bold text-white">學生快速進入</h2>
+          <p class="text-xs text-slate-400">請選擇或輸入您的座號（無需密碼）</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-2">選擇學號 (s01 ~ s30)：</label>
+          <div class="relative">
+            <select id="studentSelect" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-cyan-300 font-mono text-lg focus:outline-none focus:border-cyan-500 transition-all appearance-none cursor-pointer">
+              <!-- 動態生成 s01 ~ s30 -->
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+              ▼
+            </div>
+          </div>
+        </div>
+
+        <div class="relative flex py-1 items-center">
+          <div class="flex-grow border-t border-slate-800"></div>
+          <span class="flex-shrink mx-3 text-xs text-slate-500">或直接手動輸入</span>
+          <div class="flex-grow border-t border-slate-800"></div>
+        </div>
+
+        <div>
+          <input type="text" id="manualStudentInput" placeholder="例如: s01, s15..." class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-center text-sm font-mono text-slate-200 focus:outline-none focus:border-cyan-500 uppercase transition-all">
+        </div>
+
+        <button onclick="loginAsStudent()" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold tracking-wide shadow-lg shadow-cyan-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+          <span>進入闖關等待室</span>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </button>
+
+        <p class="text-center text-xs text-slate-500">
+          💡 提示：若老師尚未開始遊戲，進入後將先在等待大廳查看組別。
+        </p>
+      </div>
+
+      <!-- 教師登入面版 (預設隱藏) -->
+      <div id="teacherPanel" class="space-y-5 hidden">
+        <div class="text-center space-y-1">
+          <h2 class="text-xl font-bold text-white">教師主控台登入</h2>
+          <p class="text-xs text-slate-400">負責分組、開始競賽與二進位即時大螢幕投影</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1.5">教師帳號</label>
+          <input type="text" id="teacherUsername" value="t01" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 font-mono text-slate-200 focus:outline-none focus:border-cyan-500 transition-all">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1.5">登入密碼</label>
+          <input type="password" id="teacherPassword" value="t01" placeholder="請輸入密碼" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-cyan-500 transition-all">
+          <p class="text-[11px] text-slate-500 mt-1">預設帳號: <span class="text-cyan-400 font-mono">t01</span> / 密碼: <span class="text-cyan-400 font-mono">t01</span></p>
+        </div>
+
+        <div id="teacherError" class="hidden p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs"></div>
+
+        <button onclick="loginAsTeacher()" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold tracking-wide shadow-lg shadow-purple-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+          <span>進入大螢幕主控台</span>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- 遊戲舞台（登入後顯示，預設隱藏） -->
+    <div id="gameStageWrapper" class="hidden w-full flex flex-col">
+      <!-- 遊戲內頂部工具列 -->
+      <div class="flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-slate-800 backdrop-blur rounded-t-xl">
+        <span id="gameStageStudentLabel" class="font-mono text-sm text-cyan-300 font-bold"></span>
+        <button onclick="logoutStudent()" class="text-xs text-slate-400 hover:text-rose-400 transition-colors px-3 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/10">
+          ← 登出
+        </button>
+      </div>
+      <!-- iframe 遊戲舞台 -->
+      <iframe
+        id="game-stage"
+        src=""
+        class="w-full border-0 rounded-b-xl"
+        style="min-height: calc(100vh - 140px);"
+        allow="autoplay"
+      ></iframe>
+    </div>
+
+  </main>
+
+  <footer class="py-4 text-center text-xs text-slate-600 border-t border-slate-900">
+    國高中資訊科技課堂互動教材 • 結合二進位解碼與硬體知識評量
+  </footer>
+
+  <script>
+    // 預先生成學生下拉選單
+    const studentSelect = document.getElementById('studentSelect');
+    for (let i = 1; i <= 30; i++) {
+      const id = `s${String(i).padStart(2, '0')}`;
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = `${id} (第 ${i} 號)`;
+      studentSelect.appendChild(opt);
+    }
+
+    // Tab 切換
+    function switchTab(type) {
+      sound.playTick();
+      const tabStudent = document.getElementById('tabStudent');
+      const tabTeacher = document.getElementById('tabTeacher');
+      const studentPanel = document.getElementById('studentPanel');
+      const teacherPanel = document.getElementById('teacherPanel');
+
+      if (type === 'student') {
+        tabStudent.className = 'flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-white bg-cyan-600 shadow-md';
+        tabTeacher.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        studentPanel.classList.remove('hidden');
+        teacherPanel.classList.add('hidden');
+      } else {
+        tabTeacher.className = 'flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-white bg-purple-600 shadow-md';
+        tabStudent.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        teacherPanel.classList.remove('hidden');
+        studentPanel.classList.add('hidden');
+      }
+    }
+
+    // 學生登入：存入 localStorage 並以 iframe 載入遊戲模組
+    function loginAsStudent() {
+      sound.playKey();
+      const manual = document.getElementById('manualStudentInput').value.trim().toLowerCase();
+      const selected = document.getElementById('studentSelect').value;
+      const studentId = manual || selected;
+      
+      if (!studentId) {
+        alert('請輸入或選擇學號');
+        return;
+      }
+      
+      // 依 PROMPT_RULES.md 資料傳遞標準：寫入 localStorage
+      localStorage.setItem('studentId', studentId);
+
+      // 切換至遊戲舞台，以 iframe 載入 game1
+      document.getElementById('loginPanel').classList.add('hidden');
+      document.getElementById('gameStageWrapper').classList.remove('hidden');
+      document.getElementById('gameStageStudentLabel').innerText = `🎓 ${studentId.toUpperCase()} 已登入`;
+      document.getElementById('game-stage').src = '/games/game1.html';
+    }
+
+    // 登出：清除 localStorage 並回到登入面板
+    function logoutStudent() {
+      localStorage.removeItem('studentId');
+      document.getElementById('game-stage').src = '';
+      document.getElementById('gameStageWrapper').classList.add('hidden');
+      document.getElementById('loginPanel').classList.remove('hidden');
+    }
+
+    // 支援 Enter 鍵
+    document.getElementById('manualStudentInput').addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') loginAsStudent();
+    });
+
+    // 教師登入驗證
+    const socket = io();
+
+    // ── iframe 遊戲切換輔助 ──────────────────────────────────
+    // 只有在學生已登入（iframe 舞台顯示中）才執行切換
+    function loadGameInIframe(gameNum) {
+      const wrapper = document.getElementById('gameStageWrapper');
+      const iframe  = document.getElementById('game-stage');
+      if (wrapper.classList.contains('hidden')) return; // 尚未登入，不切換
+      const newSrc = `/games/game${gameNum}.html`;
+      if (iframe.src !== window.location.origin + newSrc) {
+        iframe.src = newSrc;
+      }
+    }
+
+    // ── 監聽伺服器廣播：老師發布遊戲 ──────────────────────────
+    socket.on('game_started', (data) => {
+      if (data && data.currentGame) {
+        loadGameInIframe(data.currentGame);
+      }
+    });
+
+    // 老師切換關卡（stage_changed）→ 視需要也切換 iframe
+    socket.on('stage_changed', (data) => {
+      if (data && data.currentGame) {
+        loadGameInIframe(data.currentGame);
+      }
+    });
+
+    // 老師切換遊戲模組（game_switched）→ 直接切換 iframe
+    socket.on('game_switched', (data) => {
+      if (data && data.currentGame) {
+        loadGameInIframe(data.currentGame);
+      }
+    });
+
+    // 初次連線：若伺服器已在進行中，自動載入對應遊戲
+    socket.on('state_sync', (state) => {
+      if (state.status === 'in_progress' && state.currentGame) {
+        loadGameInIframe(state.currentGame);
+      }
+    });
+
+    function loginAsTeacher() {
+      sound.playKey();
+      const u = document.getElementById('teacherUsername').value.trim();
+      const p = document.getElementById('teacherPassword').value.trim();
+      const errBox = document.getElementById('teacherError');
+
+      socket.emit('teacher_auth', { username: u, password: p }, (res) => {
+        if (res && res.success) {
+          sessionStorage.setItem('teacherAuth', 'true');
+          window.location.href = '/teacher.html';
+        } else {
+          errBox.textContent = res ? res.message : '登入失敗，請檢查帳號密碼';
+          errBox.classList.remove('hidden');
+        }
+      });
+    }
+
+    document.getElementById('teacherPassword').addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') loginAsTeacher();
+    });
+  </script>
+</body>
+</html>

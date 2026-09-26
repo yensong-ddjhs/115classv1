@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>遊戲二：二進位解密 × 硬體拖曳連連看</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+  <style>
+    /* ── Drag & Drop 互動樣式 ── */
+    .drag-card {
+      cursor: grab;
+      transition: all 0.18s ease;
+      user-select: none;
+    }
+    .drag-card:active { cursor: grabbing; }
+    .drag-card.dragging {
+      opacity: 0.45;
+      transform: scale(0.96);
+    }
+    .drop-zone {
+      transition: all 0.2s ease;
+      min-height: 52px;
+    }
+    .drop-zone.drag-over {
+      border-color: #38bdf8;
+      background-color: rgba(56, 189, 248, 0.12);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.4);
+    }
+    .drop-zone.matched-correct {
+      border-color: #10b981;
+      background-color: rgba(16, 185, 129, 0.15);
+      pointer-events: none;
+    }
+    .drop-zone.matched-wrong {
+      border-color: #f43f5e;
+      background-color: rgba(244, 63, 94, 0.12);
+    }
+    /* ── 選擇題選項 ── */
+    .choice-btn {
+      transition: all 0.15s ease;
+      cursor: pointer;
+    }
+    .choice-btn:hover:not(:disabled) {
+      border-color: #38bdf8;
+      background-color: rgba(56, 189, 248, 0.1);
+    }
+    .choice-btn.selected {
+      border-color: #38bdf8;
+      background-color: rgba(56, 189, 248, 0.2);
+    }
+    .choice-btn.correct {
+      border-color: #10b981;
+      background-color: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+    }
+    .choice-btn.wrong {
+      border-color: #f43f5e;
+      background-color: rgba(244, 63, 94, 0.15);
+      color: #fb7185;
+    }
+    /* ── 進度條 ── */
+    #binaryProgressBar {
+      transition: width 0.4s ease;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between">
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--         頂部資訊列                         -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div id="studentAvatar" class="w-9 h-9 rounded-xl bg-amber-600 flex items-center justify-center font-mono font-bold text-base shadow-md shadow-amber-600/30">
+        s--
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="studentIdDisplay" class="font-mono font-bold text-white text-base">s--</span>
+          <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+            🎯 遊戲二
+          </span>
+          <span id="groupBadge" class="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+            分配中...
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400">二進位解密 × 硬體連連看競賽</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span>已連線</span>
+      </div>
+      <button onclick="toggleAudio()" id="audioBtn" class="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-sm" title="切換音效">
+        🔊
+      </button>
+      <a href="/" class="text-xs text-slate-500 hover:text-slate-300">離開</a>
+    </div>
+  </header>
+
+  <!-- ╔══════════════════════════════════════╗ -->
+  <!--         主內容視窗                         -->
+  <!-- ╚══════════════════════════════════════╝ -->
+  <main class="flex-1 flex items-center justify-center p-4 sm:p-6 max-w-4xl mx-auto w-full">
+
+    <!-- ── 狀態 0: 等待大廳 ── -->
+    <div id="stageWaiting" class="w-full max-w-lg bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 text-center space-y-6 shadow-2xl backdrop-blur">
+      <div class="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 mx-auto flex items-center justify-center text-3xl animate-bounce">
+        🧩
+      </div>
+      <div class="space-y-2">
+        <h2 class="text-2xl font-bold text-white">歡迎進入遊戲二等待室！</h2>
+        <p class="text-sm text-amber-300 font-semibold" id="waitingGroupText">正在確認您的組別...</p>
+        <p class="text-xs text-slate-400">請等待老師點擊「開始遊戲」，畫面將自動切換至第一關！</p>
+      </div>
+      <!-- 組員名單 -->
+      <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-4 text-left">
+        <div class="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
+          <span>同組隊友</span>
+          <span id="memberCountText" class="text-[11px] font-mono text-amber-400">0 人</span>
+        </div>
+        <div id="teammatesList" class="flex flex-wrap gap-2 text-xs font-mono text-slate-300">等待老師分組...</div>
+      </div>
+      <!-- 關卡預覽 -->
+      <div class="grid grid-cols-2 gap-3 text-left">
+        <div class="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80">
+          <div class="text-xs font-bold text-amber-300 mb-1">💡 第一關：二進位解密</div>
+          <div class="text-[11px] text-slate-400">5 道進位制選擇題，答對 1 題得 1 分，滿分 5 分！</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80">
+          <div class="text-xs font-bold text-sky-300 mb-1">🖱️ 第二關：硬體連連看</div>
+          <div class="text-[11px] text-slate-400">拖曳中英文硬體名稱卡片到正確位置，5 題滿分 5 分！</div>
+        </div>
+      </div>
+      <div class="pt-2 text-xs text-slate-500 flex items-center justify-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+        <span>系統等待廣播訊號中... 請勿重整網頁</span>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!--  關卡一：二進位解密戰（選擇題）              -->
+    <!-- ══════════════════════════════════════════ -->
+    <div id="stageBinary" class="w-full max-w-2xl bg-slate-900/90 border border-amber-500/40 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur hidden">
+      <!-- 標題 -->
+      <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">STAGE 01</span>
+          <h2 class="text-xl font-bold text-white mt-1">二進位解密戰 (Binary Breaker)</h2>
+          <p class="text-xs text-slate-400">共 5 題進位制轉換選擇題，每題 1 分，答完後自動送出！</p>
+        </div>
+        <div class="text-center bg-slate-950 px-4 py-2 rounded-xl border border-slate-700">
+          <div class="text-[10px] text-slate-400 uppercase font-semibold">目前得分</div>
+          <div id="binaryScoreDisplay" class="font-mono text-2xl font-black text-amber-400">0 / 5</div>
+        </div>
+      </div>
+
+      <!-- 進度條 -->
+      <div>
+        <div class="flex justify-between text-xs text-slate-400 mb-1.5">
+          <span id="binaryProgressLabel">第 1 題 / 共 5 題</span>
+          <span id="binaryProgressPct" class="font-mono text-amber-400">0%</span>
+        </div>
+        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+          <div id="binaryProgressBar" class="h-2 bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- 題目區 -->
+      <div id="binaryQuestionArea" class="space-y-5">
+        <!-- 動態產生 -->
+      </div>
+
+      <!-- 送出按鈕（最後一題後出現） -->
+      <button id="submitBinaryBtn" onclick="submitBinary()" class="hidden w-full py-4 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black tracking-wide shadow-lg shadow-amber-500/30 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+        <span>📊 送出所有答案並計分！</span>
+      </button>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!--  關卡二：硬體拖曳連連看（Drag & Drop）        -->
+    <!-- ══════════════════════════════════════════ -->
+    <div id="stageDragDrop" class="w-full max-w-3xl bg-slate-900/90 border border-sky-500/40 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur hidden">
+      <!-- 標題 -->
+      <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">STAGE 02</span>
+          <h2 class="text-xl font-bold text-white mt-1">硬體中英拖曳連連看 (Drag & Drop)</h2>
+          <p class="text-xs text-slate-400">將左側英文卡片拖曳到右側對應的中文解釋欄位，全對得 5 分！</p>
+        </div>
+        <div class="px-3.5 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-300 font-bold text-xs font-mono">
+          滿分 5 分 (每題 1 分)
+        </div>
+      </div>
+
+      <!-- 拖曳區主體 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- 左欄：拖曳卡片 -->
+        <div>
+          <div class="text-xs font-semibold text-slate-400 mb-3 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-sky-400"></span>
+            英文名稱卡片（可拖曳）
+          </div>
+          <div id="dragCardsPool" class="space-y-2.5">
+            <!-- 動態生成拖曳卡片 -->
+          </div>
+        </div>
+        <!-- 右欄：放置目標 -->
+        <div>
+          <div class="text-xs font-semibold text-slate-400 mb-3 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            中文解釋放置區（拖曳到此）
+          </div>
+          <div id="dropZonesPool" class="space-y-2.5">
+            <!-- 動態生成放置區 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- 已完成數量提示 -->
+      <div class="flex items-center justify-between text-xs text-slate-400 pt-1">
+        <span id="ddProgressText">已完成 <span class="text-sky-400 font-bold font-mono">0</span> / 5 配對</span>
+        <button id="ddResetBtn" onclick="resetDragDrop()" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 transition-all">
+          🔄 重新開始
+        </button>
+      </div>
+
+      <!-- 送出按鈕 -->
+      <button id="submitDragDropBtn" onclick="submitDragDrop()" class="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 text-white font-bold tracking-wide shadow-lg shadow-sky-600/30 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+        <span>送出配對結果並為小組爭取分數！</span>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </button>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!--  結算畫面（Victory）                         -->
+    <!-- ══════════════════════════════════════════ -->
+    <div id="stageVictory" class="w-full max-w-lg bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 text-center space-y-6 shadow-2xl backdrop-blur hidden">
+      <div class="w-20 h-20 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-500 flex items-center justify-center text-4xl shadow-xl shadow-amber-500/20 mx-auto animate-bounce">
+        🏆
+      </div>
+      <div class="space-y-2">
+        <h2 class="text-2xl font-black text-white">遊戲二完成！太厲害了！</h2>
+        <p class="text-sm text-slate-300">您已成功完成所有關卡，分數已回傳給小組！</p>
+      </div>
+      <!-- 成績卡 -->
+      <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">個人成績結算</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400">第一關 二進位選擇</div>
+            <div id="summaryBinaryScore" class="text-xl font-black font-mono text-amber-400 mt-1">-- 分</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400">第二關 硬體拖曳</div>
+            <div id="summaryDragScore" class="text-xl font-black font-mono text-sky-400 mt-1">-- 分</div>
+          </div>
+        </div>
+        <div class="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-500/30 flex items-center justify-between">
+          <span class="text-sm font-bold text-amber-300">個人總貢獻得分：</span>
+          <span id="summaryTotalScore" class="text-3xl font-black font-mono text-amber-400 glow-text-gold">-- / 10 分</span>
+        </div>
+      </div>
+      <!-- 二進位彩蛋提示 -->
+      <div class="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200 text-left space-y-1">
+        <div class="font-bold flex items-center gap-1.5">
+          <span>💡</span> 進階挑戰：
+        </div>
+        <p>你能把你的得分 <span id="binaryHintScore" class="font-mono text-white font-bold">?</span> 分，轉換成二進位並說出來嗎？</p>
+        <p class="text-amber-300/70">提示：把十進位數字不斷除以 2，把餘數由下往上排列即是答案！</p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 頁尾 -->
+  <footer class="py-3 text-center text-xs text-slate-600 border-t border-slate-900">
+    二進位速算：每往左一位，數值就乘以 2！ &nbsp;|&nbsp; 遊戲二：二進位解密 × 硬體連連看
+  </footer>
+
+  <!-- ╔════════════════════════════════════════════════════╗ -->
+  <!--                     JavaScript                       -->
+  <!-- ╚════════════════════════════════════════════════════╝ -->
+  <script>
+    // ════════════════════════════════════════════════════════
+    // 模組初始化：從 localStorage 讀取座號
+    // Contract: 主程式 (index.html) 已寫入 localStorage.setItem('studentId', ...)
+    // ════════════════════════════════════════════════════════
+    const socket = io();
+    let myStudentId = (localStorage.getItem('studentId') || 's01').trim().toLowerCase();
+
+    // DOM
+    const studentIdDisplay = document.getElementById('studentIdDisplay');
+    const studentAvatar    = document.getElementById('studentAvatar');
+    const groupBadge       = document.getElementById('groupBadge');
+    const waitingGroupText = document.getElementById('waitingGroupText');
+    const teammatesList    = document.getElementById('teammatesList');
+    const memberCountText  = document.getElementById('memberCountText');
+
+    const stageWaiting  = document.getElementById('stageWaiting');
+    const stageBinary   = document.getElementById('stageBinary');
+    const stageDragDrop = document.getElementById('stageDragDrop');
+    const stageVictory  = document.getElementById('stageVictory');
+
+    let myGroup       = null;
+    let myStudentData = null;
+    let binaryScore   = 0;
+    let dragDropScore = 0;
+
+    // 顯示座號
+    studentIdDisplay.innerText = myStudentId.toUpperCase();
+    studentAvatar.innerText    = myStudentId.toUpperCase();
+
+    // 加入房間
+    socket.emit('student_join', { studentId: myStudentId });
+
+    socket.on('student_ready', (data) => {
+      myStudentData = data.student;
+      myGroup       = data.group;
+      updateLobbyUI(data.gameState);
+      checkGameState(data.gameState);
+    });
+
+    socket.on('state_sync', (state) => {
+      if (state.students && state.students[myStudentId]) {
+        myStudentData = state.students[myStudentId];
+        myGroup       = state.groups[myStudentData.groupId];
+      }
+      updateLobbyUI(state);
+      checkGameState(state);
+    });
+
+    socket.on('game_started', () => { sound.playVictory(); showStageBinary(); });
+    socket.on('game_reset',   () => { showWaitingLobby(); });
+
+    // ── 大廳 UI ──────────────────────────────────────────
+    function updateLobbyUI(gameState) {
+      if (!myGroup) return;
+      groupBadge.innerText  = myGroup.name;
+      groupBadge.className  = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+      waitingGroupText.innerHTML = `您已被分配到 <span class="text-amber-400 font-extrabold text-lg">${myGroup.name}</span>`;
+      teammatesList.innerHTML = '';
+      const members = myGroup.members || [];
+      memberCountText.innerText = `${members.length} 人`;
+      members.forEach(mId => {
+        const isMe     = mId === myStudentId;
+        const isOnline = gameState.students[mId] && gameState.students[mId].online;
+        const span     = document.createElement('span');
+        span.className = `px-2 py-1 rounded-lg border flex items-center gap-1.5 ${isMe ? 'bg-amber-600/30 text-amber-300 border-amber-500/50 font-bold' : (isOnline ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-950 text-slate-500 border-slate-800')}`;
+        span.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}"></span><span>${mId}${isMe ? ' (我)' : ''}</span>`;
+        teammatesList.appendChild(span);
+      });
+    }
+
+    function checkGameState(gameState) {
+      if (!myStudentData) return;
+      if (myStudentData.finished) {
+        showVictoryScreen();
+      } else if (gameState.status === 'in_progress') {
+        showStageBinary();
+      } else {
+        showWaitingLobby();
+      }
+    }
+
+    function showWaitingLobby() {
+      stageWaiting.classList.remove('hidden');
+      stageBinary.classList.add('hidden');
+      stageDragDrop.classList.add('hidden');
+      stageVictory.classList.add('hidden');
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  關卡一：二進位解密戰（選擇題）
+    //  課程綱要：七年級 ➔ 資訊科技 ➔ 單元 1：進位制與資訊表示
+    // ════════════════════════════════════════════════════════
+
+    // 題庫 JSON（符合 Master System Prompt 格式規範）
+    const BINARY_QUESTIONS = [
+      {
+        id: 1,
+        question: "二進位 <code class='text-amber-300 font-mono text-lg px-1'>1001</code>₂ 轉為十進位是多少？",
+        options: ["7", "9", "11", "13"],
+        answer: 1,   // index 0-based → "9"
+        score: 1,
+        hint: "1×2³ + 0×2² + 0×2¹ + 1×2⁰ = 8+0+0+1"
+      },
+      {
+        id: 2,
+        question: "二進位 <code class='text-amber-300 font-mono text-lg px-1'>1010</code>₂ 轉為十進位是多少？",
+        options: ["8", "10", "12", "14"],
+        answer: 1,   // "10"
+        score: 1,
+        hint: "1×2³ + 0×2² + 1×2¹ + 0×2⁰ = 8+0+2+0"
+      },
+      {
+        id: 3,
+        question: "十進位 <code class='text-amber-300 font-mono text-lg px-1'>5</code> 轉為二進位是多少？",
+        options: ["011", "100", "101", "110"],
+        answer: 2,   // "101"
+        score: 1,
+        hint: "5÷2=2餘1 → 2÷2=1餘0 → 1÷2=0餘1，由下往上：101"
+      },
+      {
+        id: 4,
+        question: "二進位 <code class='text-amber-300 font-mono text-lg px-1'>1111</code>₂ 轉為十進位是多少？",
+        options: ["13", "14", "15", "16"],
+        answer: 2,   // "15"
+        score: 1,
+        hint: "1×8 + 1×4 + 1×2 + 1×1 = 15"
+      },
+      {
+        id: 5,
+        question: "十進位 <code class='text-amber-300 font-mono text-lg px-1'>12</code> 轉為二進位是多少？",
+        options: ["1011", "1100", "1101", "1110"],
+        answer: 1,   // "1100"
+        score: 1,
+        hint: "12÷2=6餘0 → 6÷2=3餘0 → 3÷2=1餘1 → 1÷2=0餘1，由下往上：1100"
+      }
+    ];
+
+    let currentBinaryQuestion = 0;
+    const binaryUserAnswers   = new Array(BINARY_QUESTIONS.length).fill(null);
+
+    function showStageBinary() {
+      stageWaiting.classList.add('hidden');
+      stageBinary.classList.remove('hidden');
+      stageDragDrop.classList.add('hidden');
+      stageVictory.classList.add('hidden');
+
+      currentBinaryQuestion = 0;
+      binaryUserAnswers.fill(null);
+      binaryScore = 0;
+      document.getElementById('binaryScoreDisplay').innerText = '0 / 5';
+      renderBinaryQuestion(0);
+    }
+
+    // 渲染單道選擇題
+    function renderBinaryQuestion(idx) {
+      const q   = BINARY_QUESTIONS[idx];
+      const pct = Math.round((idx / BINARY_QUESTIONS.length) * 100);
+
+      document.getElementById('binaryProgressLabel').innerText = `第 ${idx + 1} 題 / 共 ${BINARY_QUESTIONS.length} 題`;
+      document.getElementById('binaryProgressPct').innerText   = `${pct}%`;
+      document.getElementById('binaryProgressBar').style.width = `${pct}%`;
+
+      const area = document.getElementById('binaryQuestionArea');
+      area.innerHTML = `
+        <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4">
+          <!-- 題目 -->
+          <div class="text-base sm:text-lg font-semibold text-white leading-relaxed">
+            <span class="text-slate-400 font-mono text-sm mr-2">Q${q.id}.</span>${q.question}
+          </div>
+          <!-- 四個選項 -->
+          <div class="grid grid-cols-2 gap-3" id="optionGrid_${q.id}">
+            ${q.options.map((opt, i) => `
+              <button
+                class="choice-btn border border-slate-700 bg-slate-900 rounded-xl px-4 py-3 text-center font-mono font-bold text-base text-slate-200"
+                data-idx="${i}"
+                onclick="selectBinaryOption(${idx}, ${i}, this)"
+              >
+                <span class="text-slate-500 text-xs mr-1">${['A','B','C','D'][i]}.</span> ${opt}
+              </button>
+            `).join('')}
+          </div>
+          <!-- 提示 (答題後顯示) -->
+          <div id="binaryHint_${q.id}" class="hidden text-xs text-amber-300/80 bg-amber-950/20 border border-amber-500/20 rounded-lg px-3 py-2">
+            💡 <span class="font-mono">${q.hint}</span>
+          </div>
+        </div>
+      `;
+
+      // 送出按鈕：最後一題出現
+      const submitBtn = document.getElementById('submitBinaryBtn');
+      if (idx === BINARY_QUESTIONS.length - 1) {
+        submitBtn.classList.remove('hidden');
+      } else {
+        submitBtn.classList.add('hidden');
+      }
+    }
+
+    // 選擇答案後立即給回饋，然後自動跳下一題
+    function selectBinaryOption(qIdx, optIdx, btnEl) {
+      if (binaryUserAnswers[qIdx] !== null) return; // 已作答，禁止重選
+      binaryUserAnswers[qIdx] = optIdx;
+      sound.playKey();
+
+      const q       = BINARY_QUESTIONS[qIdx];
+      const correct = optIdx === q.answer;
+      const grid    = document.querySelectorAll(`#optionGrid_${q.id} .choice-btn`);
+
+      grid.forEach((btn, i) => {
+        btn.disabled = true;
+        if (i === q.answer) btn.classList.add('correct');
+        else if (i === optIdx && !correct) btn.classList.add('wrong');
+      });
+
+      if (correct) {
+        binaryScore++;
+        document.getElementById('binaryScoreDisplay').innerText = `${binaryScore} / 5`;
+        sound.playVictory();
+      }
+
+      // 顯示計算提示
+      document.getElementById(`binaryHint_${q.id}`).classList.remove('hidden');
+
+      // 自動進入下一題（1.2 秒後）
+      const nextIdx = qIdx + 1;
+      if (nextIdx < BINARY_QUESTIONS.length) {
+        setTimeout(() => {
+          currentBinaryQuestion = nextIdx;
+          renderBinaryQuestion(nextIdx);
+        }, 1200);
+      } else {
+        // 最後一題：顯示送出按鈕
+        document.getElementById('submitBinaryBtn').classList.remove('hidden');
+      }
+    }
+
+    // 送出二進位關卡分數
+    function submitBinary() {
+      sound.playVictory();
+      socket.emit('submit_stage1', { studentId: myStudentId, score: binaryScore, timeTaken: 0 });
+      localStorage.setItem('latestScore', binaryScore);
+
+      // 更新進度條至 100%
+      document.getElementById('binaryProgressBar').style.width = '100%';
+      document.getElementById('binaryProgressPct').innerText = '100%';
+      document.getElementById('binaryProgressLabel').innerText = '全部完成！';
+      document.getElementById('submitBinaryBtn').disabled = true;
+      document.getElementById('submitBinaryBtn').innerText  = '✅ 分數已送出，載入關卡二...';
+
+      setTimeout(() => showStageDragDrop(), 1800);
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  關卡二：硬體中英拖曳連連看（HTML5 Drag & Drop）
+    //  課程綱要：七年級 ➔ 資訊科技 ➔ 單元 2：電腦五大硬體元件
+    // ════════════════════════════════════════════════════════
+
+    // 配對題庫 JSON
+    const DRAG_DROP_PAIRS = [
+      { drag_id: 'c1', drag_text: 'CPU',          icon: '🔲', drop_id: 't1', drop_text: '中央處理器' },
+      { drag_id: 'c2', drag_text: 'RAM',          icon: '⚡', drop_id: 't2', drop_text: '隨機存取記憶體' },
+      { drag_id: 'c3', drag_text: 'SSD / HDD',   icon: '💾', drop_id: 't3', drop_text: '儲存硬碟' },
+      { drag_id: 'c4', drag_text: 'GPU',          icon: '🎮', drop_id: 't4', drop_text: '繪圖處理器' },
+      { drag_id: 'c5', drag_text: 'Motherboard', icon: '🔌', drop_id: 't5', drop_text: '主機板' }
+    ];
+
+    let ddMatchedCount  = 0;   // 已正確配對數量
+    let ddCorrectCount  = 0;   // 正確數量（計分用）
+    let ddCurrentDragId = null;
+
+    function showStageDragDrop() {
+      stageWaiting.classList.add('hidden');
+      stageBinary.classList.add('hidden');
+      stageDragDrop.classList.remove('hidden');
+      stageVictory.classList.add('hidden');
+
+      ddMatchedCount  = 0;
+      ddCorrectCount  = 0;
+      ddCurrentDragId = null;
+      renderDragDrop();
+    }
+
+    // 渲染拖曳面板（打亂順序）
+    function renderDragDrop() {
+      const pool     = document.getElementById('dragCardsPool');
+      const dropPool = document.getElementById('dropZonesPool');
+      pool.innerHTML     = '';
+      dropPool.innerHTML = '';
+
+      // 打亂拖曳卡片順序
+      const shuffledCards = [...DRAG_DROP_PAIRS].sort(() => Math.random() - 0.5);
+      // 打亂放置目標順序
+      const shuffledDrops = [...DRAG_DROP_PAIRS].sort(() => Math.random() - 0.5);
+
+      shuffledCards.forEach(pair => {
+        const card = document.createElement('div');
+        card.id        = `drag_${pair.drag_id}`;
+        card.className = 'drag-card flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-700 bg-slate-800 text-white font-bold';
+        card.setAttribute('draggable', 'true');
+        card.dataset.dragId = pair.drag_id;
+        card.innerHTML = `<span class="text-xl">${pair.icon}</span><span class="font-mono text-sm">${pair.drag_text}</span>`;
+
+        // Desktop: HTML5 Drag events
+        card.addEventListener('dragstart', onDragStart);
+        card.addEventListener('dragend',   onDragEnd);
+
+        // Mobile: Touch events
+        card.addEventListener('touchstart', onTouchStart, { passive: true });
+        card.addEventListener('touchmove',  onTouchMove,  { passive: false });
+        card.addEventListener('touchend',   onTouchEnd);
+
+        pool.appendChild(card);
+      });
+
+      shuffledDrops.forEach(pair => {
+        const zone = document.createElement('div');
+        zone.id        = `drop_${pair.drop_id}`;
+        zone.className = 'drop-zone flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed border-slate-700 bg-slate-950/60 text-slate-300 text-sm';
+        zone.dataset.dropId     = pair.drop_id;
+        zone.dataset.correctDragId = pair.drag_id;
+        zone.innerHTML = `<span class="text-slate-500 font-mono text-xs mr-1">→</span>${pair.drop_text}`;
+
+        zone.addEventListener('dragover',  onDragOver);
+        zone.addEventListener('dragleave', onDragLeave);
+        zone.addEventListener('drop',      onDrop);
+
+        dropPool.appendChild(zone);
+      });
+
+      updateDDProgress();
+    }
+
+    // ── Desktop Drag Events ──────────────────────────────────
+    function onDragStart(e) {
+      ddCurrentDragId = this.dataset.dragId;
+      this.classList.add('dragging');
+      e.dataTransfer.setData('text/plain', ddCurrentDragId);
+      e.dataTransfer.effectAllowed = 'move';
+    }
+    function onDragEnd(e) {
+      this.classList.remove('dragging');
+    }
+    function onDragOver(e) {
+      e.preventDefault();
+      if (!this.classList.contains('matched-correct')) {
+        this.classList.add('drag-over');
+      }
+    }
+    function onDragLeave(e) {
+      this.classList.remove('drag-over');
+    }
+    function onDrop(e) {
+      e.preventDefault();
+      this.classList.remove('drag-over');
+      if (this.classList.contains('matched-correct')) return;
+      const dragId = e.dataTransfer.getData('text/plain');
+      handleMatch(dragId, this);
+    }
+
+    // ── Mobile Touch Events ──────────────────────────────────
+    let touchDragEl    = null;
+    let touchClone     = null;
+    let touchOffsetX   = 0;
+    let touchOffsetY   = 0;
+
+    function onTouchStart(e) {
+      const t = e.touches[0];
+      touchDragEl = this;
+      ddCurrentDragId = this.dataset.dragId;
+      const rect = this.getBoundingClientRect();
+      touchOffsetX = t.clientX - rect.left;
+      touchOffsetY = t.clientY - rect.top;
+
+      // 建立視覺替身
+      touchClone = this.cloneNode(true);
+      touchClone.style.cssText = `
+        position: fixed; z-index: 9999; opacity: 0.85; pointer-events: none;
+        left: ${rect.left}px; top: ${rect.top}px;
+        width: ${rect.width}px; border-radius: 12px;
+        background: #1e3a5f; border: 2px solid #38bdf8;
+      `;
+      document.body.appendChild(touchClone);
+      this.style.opacity = '0.4';
+    }
+
+    function onTouchMove(e) {
+      e.preventDefault();
+      if (!touchClone) return;
+      const t = e.touches[0];
+      touchClone.style.left = `${t.clientX - touchOffsetX}px`;
+      touchClone.style.top  = `${t.clientY - touchOffsetY}px`;
+
+      // 高亮當前懸停的 drop zone
+      document.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('drag-over'));
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const dropZone = el && el.closest('.drop-zone');
+      if (dropZone && !dropZone.classList.contains('matched-correct')) {
+        dropZone.classList.add('drag-over');
+      }
+    }
+
+    function onTouchEnd(e) {
+      if (!touchClone) return;
+      const t = e.changedTouches[0];
+      document.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('drag-over'));
+
+      // 找到落點的 drop zone
+      touchClone.style.display = 'none';
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      touchClone.style.display = '';
+      const dropZone = el && el.closest('.drop-zone');
+
+      if (dropZone && !dropZone.classList.contains('matched-correct')) {
+        handleMatch(ddCurrentDragId, dropZone);
+      }
+
+      // 清理
+      if (touchDragEl) touchDragEl.style.opacity = '1';
+      touchClone.remove();
+      touchClone = null;
+      touchDragEl = null;
+    }
+
+    // ── 配對邏輯 ──────────────────────────────────────────
+    function handleMatch(dragId, dropZone) {
+      const isCorrect = dropZone.dataset.correctDragId === dragId;
+      const pair      = DRAG_DROP_PAIRS.find(p => p.drag_id === dragId);
+      if (!pair) return;
+
+      sound.playKey();
+
+      if (isCorrect) {
+        sound.playVictory();
+        ddCorrectCount++;
+        ddMatchedCount++;
+
+        // 鎖定 drop zone，顯示配對結果
+        dropZone.classList.add('matched-correct');
+        dropZone.innerHTML = `
+          <span class="text-emerald-400 font-bold text-xl mr-2">✓</span>
+          <span class="font-mono text-sm text-white font-bold">${pair.drag_text}</span>
+          <span class="text-slate-400 mx-2">→</span>
+          <span class="text-emerald-300 text-sm">${dropZone.querySelector('span:last-child') ? dropZone.innerText.replace('→','').trim() : dropZone.dataset.dropId}</span>
+        `;
+        // 移除已配對的拖曳卡片
+        const dragCard = document.getElementById(`drag_${dragId}`);
+        if (dragCard) {
+          dragCard.style.transition = 'all 0.3s ease';
+          dragCard.style.opacity    = '0';
+          dragCard.style.transform  = 'scale(0.85)';
+          setTimeout(() => dragCard.remove(), 300);
+        }
+      } else {
+        // 錯誤：閃紅邊框後還原
+        dropZone.classList.add('matched-wrong');
+        setTimeout(() => dropZone.classList.remove('matched-wrong'), 800);
+      }
+
+      updateDDProgress();
+    }
+
+    function updateDDProgress() {
+      const progressSpan = document.querySelector('#ddProgressText span');
+      if (progressSpan) progressSpan.innerText = ddMatchedCount;
+    }
+
+    // 重置拖曳關卡
+    function resetDragDrop() {
+      ddMatchedCount = 0;
+      ddCorrectCount = 0;
+      renderDragDrop();
+    }
+
+    // 送出拖曳關卡
+    function submitDragDrop() {
+      sound.playKey();
+      dragDropScore = ddCorrectCount;
+
+      // 將未配對的題目標記為錯誤
+      document.querySelectorAll('.drop-zone:not(.matched-correct)').forEach(z => {
+        z.classList.add('matched-wrong');
+      });
+
+      document.getElementById('submitDragDropBtn').disabled = true;
+      document.getElementById('submitDragDropBtn').innerText = '🎯 配對完成，成績已回傳！';
+      document.getElementById('ddResetBtn').disabled = true;
+
+      // 透過 WebSocket 送出分數
+      socket.emit('submit_stage2', { studentId: myStudentId, score: dragDropScore });
+
+      sound.playVictory();
+      setTimeout(() => showVictoryScreen(binaryScore, dragDropScore), 1500);
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  結算畫面
+    // ════════════════════════════════════════════════════════
+    function showVictoryScreen(s1 = binaryScore, s2 = dragDropScore) {
+      stageWaiting.classList.add('hidden');
+      stageBinary.classList.add('hidden');
+      stageDragDrop.classList.add('hidden');
+      stageVictory.classList.remove('hidden');
+
+      const total = s1 + s2;
+      document.getElementById('summaryBinaryScore').innerText  = `${s1} 分`;
+      document.getElementById('summaryDragScore').innerText    = `${s2} 分`;
+      document.getElementById('summaryTotalScore').innerText   = `${total} / 10 分`;
+      document.getElementById('binaryHintScore').innerText     = total;
+
+      // 依 PROMPT_RULES.md：寫入 localStorage
+      localStorage.setItem('latestScore', total);
+
+      // 通知父視窗（若在 iframe 內）
+      if (window.parent && window.parent !== window && typeof window.parent.saveScore === 'function') {
+        window.parent.saveScore(total);
+      }
+    }
+
+    // 音效開關
+    function toggleAudio() {
+      sound.enabled = !sound.enabled;
+      document.getElementById('audioBtn').innerText = sound.enabled ? '🔊' : '🔇';
+    }
+  </script>
+</body>
+</html>

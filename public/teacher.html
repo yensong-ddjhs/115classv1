@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>教師主控大螢幕 | 二進位闖關即時戰況</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+
+  <!-- 頂部導航與主控快捷列 -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-xl bg-purple-600 flex items-center justify-center font-bold text-xl shadow-lg shadow-purple-500/25">
+        🧑‍🏫
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-lg font-bold tracking-wide tech-font text-white">
+            TEACHER COMMAND CENTER
+          </h1>
+          <span id="gameStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            等待開始
+          </span>
+        </div>
+        <p class="text-xs text-slate-400">大螢幕戰況投影 & 二進位課堂引導主控台</p>
+      </div>
+    </div>
+
+    <!-- 快捷功能與全螢幕按鈕 -->
+    <div class="flex items-center gap-3">
+      <!-- 二進位位元權重輔助開關 (教學專用) -->
+      <label class="flex items-center gap-2 bg-slate-800/70 px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium cursor-pointer hover:bg-slate-800">
+        <input type="checkbox" id="toggleBitWeights" checked class="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700 focus:ring-0">
+        <span>顯示位元權重提示 (16, 8, 4, 2, 1)</span>
+      </label>
+
+      <!-- 快速全部揭曉 / 隱藏十進位 -->
+      <button id="toggleAllAnswersBtn" onclick="toggleAllAnswers()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition-all flex items-center gap-1.5">
+        <span>👁️ 全部顯示十進位</span>
+      </button>
+
+      <!-- 課前模擬按鈕 (方便單人測試) -->
+      <button onclick="simulateScore()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 transition-all flex items-center gap-1.5" title="模擬一個隨機學生送分，方便測試畫面">
+        <span>⚡ 模擬學生得分</span>
+      </button>
+
+      <!-- 音效開關 -->
+      <button onclick="toggleAudio()" id="audioBtn" class="p-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white" title="切換音效">
+        🔊
+      </button>
+
+      <!-- 全螢幕切換 -->
+      <button onclick="toggleFullScreen()" class="p-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white" title="全螢幕投影模式">
+        ⛶
+      </button>
+
+      <a href="/" class="px-3 py-1.5 rounded-lg text-xs bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30">
+        登出
+      </a>
+    </div>
+  </header>
+
+  <!-- 主控制區：階段一 設定與分組面板 -->
+  <section class="border-b border-slate-800 bg-slate-900/40 px-6 py-4">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex flex-wrap items-center gap-4">
+        <!-- 學生人數設定 -->
+        <div class="flex items-center gap-2">
+          <label class="text-xs font-semibold text-slate-400">班級人數：</label>
+          <input type="number" id="numStudents" value="30" min="2" max="60" class="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-center text-sm font-bold text-cyan-400 focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <!-- 組別數量設定 -->
+        <div class="flex items-center gap-2">
+          <label class="text-xs font-semibold text-slate-400">組別數量：</label>
+          <input type="number" id="numGroups" value="5" min="2" max="10" class="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-center text-sm font-bold text-cyan-400 focus:outline-none focus:border-cyan-500">
+        </div>
+
+        <!-- 隨機分組按鈕 -->
+        <button onclick="generateGroups()" class="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs sm:text-sm font-bold shadow-md shadow-cyan-600/30 transition-all flex items-center gap-2">
+          <span>🎲 隨機分組</span>
+        </button>
+
+        <!-- 分隔線 -->
+        <div class="h-6 w-px bg-slate-700"></div>
+
+        <!-- 遊戲模組選擇器 -->
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">選遊戲：</span>
+          <div class="flex gap-1.5">
+            <button
+              data-game-btn="1"
+              onclick="switchGame(1)"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold border transition-all bg-cyan-600 text-white border-cyan-500"
+              title="遊戲一：英打挑戰 × 硬體配對"
+            >🎯 遊戲一</button>
+            <button
+              data-game-btn="2"
+              onclick="switchGame(2)"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold border transition-all bg-slate-800 text-slate-300 border-slate-700"
+              title="遊戲二：二進位解密 × 硬體連連看"
+            >🧩 遊戲二</button>
+          </div>
+        </div>
+
+        <!-- 關卡選擇器 -->
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-semibold text-slate-400 whitespace-nowrap">切關卡：</span>
+          <div class="flex gap-1.5">
+            <button
+              data-stage-btn="1"
+              onclick="switchStage(1)"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold border transition-all bg-amber-600 text-white border-amber-500"
+              title="直接進入關卡一"
+            >① 關一</button>
+            <button
+              data-stage-btn="2"
+              onclick="switchStage(2)"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold border transition-all bg-slate-800 text-slate-300 border-slate-700"
+              title="直接進入關卡二"
+            >② 關二</button>
+          </div>
+        </div>
+
+        <!-- 分隔線 -->
+        <div class="h-6 w-px bg-slate-700"></div>
+
+        <!-- 開始遊戲按鈕 -->
+        <button id="startGameBtn" onclick="startGame()" class="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-2">
+          <span>🚀 發布遊戲 1 — 關卡 1</span>
+        </button>
+
+        <!-- 重置按鈕 -->
+        <button onclick="resetGame()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-all">
+          🔄 重置分數
+        </button>
+      </div>
+
+      <!-- 連線統計與引導 -->
+      <div class="flex items-center gap-4 text-xs">
+        <div class="bg-slate-950 px-3.5 py-1.5 rounded-lg border border-slate-800 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span class="text-slate-400">在線學生：</span>
+          <span id="onlineCount" class="font-bold font-mono text-emerald-400">0 / 30</span>
+        </div>
+        <div class="bg-slate-950 px-3.5 py-1.5 rounded-lg border border-slate-800 flex items-center gap-2">
+          <span class="text-slate-400">學生連線網址：</span>
+          <span id="serverUrl" class="font-mono text-cyan-400 font-semibold select-all">載入中...</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 課堂教學引導即時提示卡片 -->
+  <div class="max-w-7xl mx-auto w-full px-6 pt-4">
+    <div class="p-3 bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-slate-900 border border-purple-500/30 rounded-xl flex items-center justify-between text-xs text-purple-200">
+      <div class="flex items-center gap-2">
+        <span class="text-base">💡</span>
+        <span><b>課堂二進位提問引導：</b>「大家看第 X 組的二進位是 <span id="hintBinaryText" class="font-mono text-cyan-300 font-bold">1011</span>，請搶答對應的十進位是多少分？」</span>
+      </div>
+      <span class="text-[11px] text-purple-300/70">（滿分 8 分 × 組員人數 = 各組理論滿分）</span>
+    </div>
+  </div>
+
+  <!-- 主內容區：階段二 即時戰況面板 (二進位即時大看版) -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-6 py-6">
+    <div id="groupsContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- 動態插入各組卡片 -->
+    </div>
+  </main>
+
+  <!-- 底部最新即時戰報動態捲軸 -->
+  <footer class="border-t border-slate-800 bg-slate-900/90 px-6 py-2.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between text-xs">
+      <div class="flex items-center gap-2 overflow-hidden">
+        <span class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-bold font-mono">LIVE FEED</span>
+        <span id="liveFeedText" class="text-slate-300 truncate">等待學生連線與作答...</span>
+      </div>
+      <div class="text-slate-500">
+        二進位公式: 
+        <span class="font-mono text-cyan-400">... + 8×b3 + 4×b2 + 2×b1 + 1×b0</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/teacher.js"></script>
+</body>
+</html>
