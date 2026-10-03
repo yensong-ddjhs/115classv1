@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>學生闖關挑戰室 | 即時分組二進位競賽</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between">
+
+  <!-- 頂部資訊列 -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div id="studentAvatar" class="w-9 h-9 rounded-xl bg-cyan-600 flex items-center justify-center font-mono font-bold text-base shadow-md shadow-cyan-600/30">
+        s--
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="studentIdDisplay" class="font-mono font-bold text-white text-base">s--</span>
+          <span id="groupBadge" class="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+            分配中...
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400">電腦教室即時闖關競賽</p>
+      </div>
+    </div>
+
+    <!-- 狀態指示與音效 -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        <span>已連線</span>
+      </div>
+      <button onclick="toggleAudio()" id="audioBtn" class="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-sm" title="切換音效">
+        🔊
+      </button>
+      <a href="/" class="text-xs text-slate-500 hover:text-slate-300">離開</a>
+    </div>
+  </header>
+
+  <!-- 主內容視窗 -->
+  <main class="flex-1 flex items-center justify-center p-4 sm:p-6 max-w-4xl mx-auto w-full">
+
+    <!-- 狀態 1: 等待大廳 (Waiting Lobby) -->
+    <div id="stageWaiting" class="w-full max-w-lg bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 text-center space-y-6 shadow-2xl backdrop-blur">
+      <div class="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 mx-auto flex items-center justify-center text-3xl animate-bounce">
+        ⏳
+      </div>
+      
+      <div class="space-y-2">
+        <h2 class="text-2xl font-bold text-white">歡迎進入闖關等待室！</h2>
+        <p class="text-sm text-cyan-300 font-semibold" id="waitingGroupText">
+          正在確認您的組別...
+        </p>
+        <p class="text-xs text-slate-400">
+          老師正在前方主控台進行分組與準備。請等待老師點擊「開始遊戲」，畫面將自動切換至第一關！
+        </p>
+      </div>
+
+      <!-- 組員名單提示卡 -->
+      <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-4 text-left">
+        <div class="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
+          <span>同組隊友</span>
+          <span id="memberCountText" class="text-[11px] font-mono text-cyan-400">0 人</span>
+        </div>
+        <div id="teammatesList" class="flex flex-wrap gap-2 text-xs font-mono text-slate-300">
+          等待老師分組...
+        </div>
+      </div>
+
+      <!-- 規則小預告 -->
+      <div class="grid grid-cols-2 gap-3 text-left">
+        <div class="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80">
+          <div class="text-xs font-bold text-amber-300 mb-1">🏁 第一關：字母極速</div>
+          <div class="text-[11px] text-slate-400">一字不差鍵入 a-z，60 秒內可獲得 3 分最高分！</div>
+        </div>
+        <div class="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80">
+          <div class="text-xs font-bold text-cyan-300 mb-1">💻 第二關：硬體配對</div>
+          <div class="text-[11px] text-slate-400">CPU、RAM、硬碟等 5 題核心觀念配對，滿分 5 分！</div>
+        </div>
+      </div>
+
+      <div class="pt-2 text-xs text-slate-500 flex items-center justify-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+        <span>系統等待廣播訊號中... 請勿重整網頁</span>
+      </div>
+    </div>
+
+    <!-- 狀態 2: 第一關 (英文字母極速挑戰 Alphabet Speedrun) -->
+    <div id="stage1" class="w-full max-w-2xl bg-slate-900/90 border border-cyan-500/40 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur hidden">
+      <!-- 關卡標題與倒數計時器 -->
+      <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">STAGE 01</span>
+          <h2 class="text-xl font-bold text-white mt-1">英文字母極速挑戰 (Alphabet Speedrun)</h2>
+          <p class="text-xs text-slate-400">請依序輸入 a 到 z 共 26 個英文字母，愈快完成得分愈高！</p>
+        </div>
+
+        <!-- 3分鐘倒數圓牌 -->
+        <div class="flex items-center gap-3 bg-slate-950 px-4 py-2 rounded-xl border border-slate-700">
+          <span class="text-xl">⏱️</span>
+          <div>
+            <div class="text-[10px] text-slate-400 uppercase font-semibold">剩餘時間</div>
+            <div id="timerDisplay" class="font-mono text-2xl font-black text-amber-400 tracking-wider">03:00</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 計分規則圖示 -->
+      <div class="grid grid-cols-3 gap-2 text-center text-xs">
+        <div class="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">
+          <div class="font-bold">60 秒以內</div>
+          <div class="font-mono text-base font-extrabold text-emerald-400">★ 3 分</div>
+        </div>
+        <div class="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300">
+          <div class="font-bold">61 ~ 120 秒</div>
+          <div class="font-mono text-base font-extrabold text-blue-400">★ 2 分</div>
+        </div>
+        <div class="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
+          <div class="font-bold">121 ~ 180 秒</div>
+          <div class="font-mono text-base font-extrabold text-amber-400">★ 1 分</div>
+        </div>
+      </div>
+
+      <!-- 26 個字母視覺進度條 -->
+      <div>
+        <div class="text-xs font-semibold text-slate-400 mb-2 flex justify-between">
+          <span>目標字母序列：</span>
+          <span id="typingProgressText" class="font-mono text-cyan-400 font-bold">0 / 26</span>
+        </div>
+        <div id="lettersContainer" class="flex flex-wrap gap-1 sm:gap-1.5 p-3 rounded-xl bg-slate-950 border border-slate-800 justify-center">
+          <!-- 動態生成 a-z 26 個字母卡 -->
+        </div>
+      </div>
+
+      <!-- 輸入框 -->
+      <div class="space-y-2">
+        <label class="block text-xs font-semibold text-slate-300">在下方輸入 (大小寫皆可，自動比對)：</label>
+        <div class="relative">
+          <input 
+            type="text" 
+            id="alphabetInput" 
+            autocomplete="off" 
+            autocorrect="off" 
+            autocapitalize="off" 
+            spellcheck="false"
+            placeholder="點此開始快速輸入 abcdefg..." 
+            class="w-full bg-slate-950 border-2 border-cyan-500/60 rounded-xl px-4 py-4 text-center font-mono text-xl sm:text-2xl text-cyan-300 tracking-widest focus:outline-none focus:border-cyan-400 shadow-inner"
+          >
+        </div>
+        <p id="typingFeedback" class="text-center text-xs text-slate-400">
+          請直接在鍵盤上敲擊字母，完成後系統將立即停止計時並送分！
+        </p>
+      </div>
+
+      <!-- 完成彈窗提示 -->
+      <div id="stage1SuccessBanner" class="hidden p-4 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-center space-y-2">
+        <div class="text-emerald-300 font-bold text-lg">🎉 太神啦！第一關完成！</div>
+        <div id="stage1ScoreText" class="text-sm text-emerald-200">花費時間：-- 秒，獲得 -- 分</div>
+        <div class="text-xs text-slate-300 animate-pulse">正在為您開啟第二關：電腦硬體知識挑戰...</div>
+      </div>
+    </div>
+
+    <!-- 狀態 3: 第二關 (電腦硬體知識配對 Hardware Matching) -->
+    <div id="stage2" class="w-full max-w-3xl bg-slate-900/90 border border-purple-500/40 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur hidden">
+      <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">STAGE 02</span>
+          <h2 class="text-xl font-bold text-white mt-1">電腦硬體核心知識配對 (Hardware Matching)</h2>
+          <p class="text-xs text-slate-400">請為左側 5 項核心零組件，選出最對應的正確功能敘述！</p>
+        </div>
+        <div class="px-3.5 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold text-xs font-mono">
+          滿分 5 分 (每題 1 分)
+        </div>
+      </div>
+
+      <!-- 配對表單清單 -->
+      <div id="hardwareListContainer" class="space-y-4">
+        <!-- 動態產生 5 道硬體配對題目 -->
+      </div>
+
+      <!-- 送出按鈕 -->
+      <div class="pt-2">
+        <button id="submitStage2Btn" onclick="submitStage2()" class="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold tracking-wide shadow-lg shadow-purple-600/30 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+          <span>送出答案並為小組爭取分數！</span>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 狀態 4: 全破結算畫面 (Victory Lobby) -->
+    <div id="stageVictory" class="w-full max-w-lg bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 text-center space-y-6 shadow-2xl backdrop-blur hidden">
+      <div class="w-20 h-20 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-600 flex items-center justify-center text-4xl shadow-xl shadow-amber-500/20 mx-auto animate-bounce">
+        🏆
+      </div>
+
+      <div class="space-y-2">
+        <h2 class="text-2xl font-black text-white">恭喜您完成所有闖關挑戰！</h2>
+        <p class="text-sm text-slate-300">您已成功為小組貢獻分數，請觀看前方黑板二進位大螢幕！</p>
+      </div>
+
+      <!-- 成績統計卡片 -->
+      <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">個人成績結算</div>
+        
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-3 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400">第一關 字母輸入</div>
+            <div id="summaryS1Score" class="text-xl font-black font-mono text-cyan-400 mt-1">-- 分</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-xs text-slate-400">第二關 硬體配對</div>
+            <div id="summaryS2Score" class="text-xl font-black font-mono text-purple-400 mt-1">-- 分</div>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-500/30 flex items-center justify-between">
+          <span class="text-sm font-bold text-amber-300">個人總貢獻得分：</span>
+          <span id="summaryTotalScore" class="text-3xl font-black font-mono text-amber-400 glow-text-gold">-- / 8 分</span>
+        </div>
+      </div>
+
+      <!-- 二進位提示訊息 -->
+      <div class="p-4 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-xs text-cyan-200 text-left space-y-1">
+        <div class="font-bold flex items-center gap-1.5">
+          <span>💡</span> 課堂二進位提示：
+        </div>
+        <p>老師螢幕上的數字是由 <span class="font-mono text-white font-bold">0</span> 與 <span class="font-mono text-white font-bold">1</span> 組成的二進位數字。</p>
+        <p>每一位元代表的值是 <span class="font-mono text-cyan-300 font-bold">16, 8, 4, 2, 1</span>，你能搶先心算出你們組目前的十進位總分嗎？</p>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- 頁尾 -->
+  <footer class="py-3 text-center text-xs text-slate-600 border-t border-slate-900">
+    二進位小知識：二進位只有 0 和 1 兩個數字，每逢 2 就向前進位一次！
+  </footer>
+
+  <script src="/js/student.js"></script>
+</body>
+</html>

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>即時分組闖關 × 二進位解碼 | 課堂互動系統</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col min-h-screen">
+  <!-- 頂部導覽列 -->
+  <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-bold text-xl shadow-lg shadow-cyan-500/20">
+        01
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-wide tech-font text-white flex items-center gap-2">
+          CLASS BINARY ARENA
+          <span class="text-xs font-normal px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">二進位闖關</span>
+        </h1>
+        <p class="text-xs text-slate-400">分組闖關 × 二進位轉換 × 電腦硬體知識競賽</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+        伺服器正常運作中
+      </span>
+    </div>
+  </header>
+
+  <!-- 主內容區 -->
+  <main class="flex-1 flex items-center justify-center p-4 sm:p-8">
+
+    <!-- 登入面版（預設顯示） -->
+    <div id="loginPanel" class="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl shadow-2xl p-6 sm:p-8 backdrop-blur">
+      
+      <!-- 登入身份切換 Tab -->
+      <div class="flex rounded-xl bg-slate-950 p-1.5 border border-slate-800 mb-6">
+        <button id="tabStudent" onclick="switchTab('student')" class="flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-white bg-cyan-600 shadow-md">
+          🎓 學生登入
+        </button>
+        <button id="tabTeacher" onclick="switchTab('teacher')" class="flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all text-slate-400 hover:text-slate-200">
+          🧑‍🏫 教師控制台
+        </button>
+      </div>
+
+      <!-- 學生登入面版 -->
+      <div id="studentPanel" class="space-y-5">
+        <div class="text-center space-y-1">
+          <h2 class="text-xl font-bold text-white">學生快速進入</h2>
+          <p class="text-xs text-slate-400">請選擇或輸入您的座號（無需密碼）</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-2">選擇學號 (s01 ~ s30)：</label>
+          <div class="relative">
+            <select id="studentSelect" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-cyan-300 font-mono text-lg focus:outline-none focus:border-cyan-500 transition-all appearance-none cursor-pointer">
+              <!-- 動態生成 s01 ~ s30 -->
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+              ▼
+            </div>
+          </div>
+        </div>
+
+        <div class="relative flex py-1 items-center">
+          <div class="flex-grow border-t border-slate-800"></div>
+          <span class="flex-shrink mx-3 text-xs text-slate-500">或直接手動輸入</span>
+          <div class="flex-grow border-t border-slate-800"></div>
+        </div>
+
+        <div>
+          <input type="text" id="manualStudentInput" placeholder="例如: s01, s15..." class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-center text-sm font-mono text-slate-200 focus:outline-none focus:border-cyan-500 uppercase transition-all">
+        </div>
+
+        <button onclick="loginAsStudent()" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold tracking-wide shadow-lg shadow-cyan-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+          <span>進入闖關等待室</span>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </button>
+
+        <p class="text-center text-xs text-slate-500">
+          💡 提示：若老師尚未開始遊戲，進入後將先在等待大廳查看組別。
+        </p>
+      </div>
+
+      <!-- 教師登入面版 (預設隱藏) -->
+      <div id="teacherPanel" class="space-y-5 hidden">
+        <div class="text-center space-y-1">
+          <h2 class="text-xl font-bold text-white">教師主控台登入</h2>
+          <p class="text-xs text-slate-400">負責分組、開始競賽與二進位即時大螢幕投影</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1.5">教師帳號</label>
+          <input type="text" id="teacherUsername" value="t01" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 font-mono text-slate-200 focus:outline-none focus:border-cyan-500 transition-all">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1.5">登入密碼</label>
+          <input type="password" id="teacherPassword" value="t01" placeholder="請輸入密碼" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 focus:outline-none focus:border-cyan-500 transition-all">
+          <p class="text-[11px] text-slate-500 mt-1">預設帳號: <span class="text-cyan-400 font-mono">t01</span> / 密碼: <span class="text-cyan-400 font-mono">t01</span></p>
+        </div>
+
+        <div id="teacherError" class="hidden p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs"></div>
+
+        <button onclick="loginAsTeacher()" class="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold tracking-wide shadow-lg shadow-purple-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2">
+          <span>進入大螢幕主控台</span>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- 遊戲舞台（登入後顯示，預設隱藏） -->
+    <div id="gameStageWrapper" class="hidden w-full flex flex-col">
+      <!-- 遊戲內頂部工具列 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 backdrop-blur rounded-t-xl">
+        <div class="flex flex-wrap items-center gap-3">
+          <span id="gameStageStudentLabel" class="font-mono text-sm text-cyan-300 font-bold mr-1"></span>
+          <!-- 動態遊戲選單容器（受主控端限制，僅顯示當前指派遊戲） -->
+          <div id="gameMenu" class="flex flex-wrap items-center gap-2"></div>
+        </div>
+        <button onclick="logoutStudent()" class="text-xs text-slate-400 hover:text-rose-400 transition-colors px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/10 flex items-center gap-1">
+          ← 登出
+        </button>
+      </div>
+
+      <!-- 遊戲舞台與等待遮罩容器 -->
+      <div class="relative w-full flex-1" style="min-height: calc(100vh - 140px);">
+        <!-- 等待老師開始遮罩 (預設顯示，直到老師按下開始遊戲才解鎖) -->
+        <div id="waitingOverlay" class="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/92 backdrop-blur-md p-6 text-center transition-all duration-300 rounded-b-xl">
+          <div class="max-w-md w-full bg-slate-900/95 border border-cyan-500/30 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-cyan-950/60 space-y-5">
+            <div class="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 mx-auto flex items-center justify-center text-3xl animate-bounce">
+              ⏳
+            </div>
+            
+            <div class="space-y-1.5">
+              <h3 class="text-xl font-bold text-white tracking-wide">等待老師開始遊戲</h3>
+              <p id="waitingStudentInfo" class="text-xs font-mono text-cyan-300"></p>
+            </div>
+
+            <!-- 目前指派遊戲卡片 -->
+            <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-left space-y-1">
+              <div class="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                <span>目前指派遊戲</span>
+                <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">鎖定中</span>
+              </div>
+              <div id="waitingGameTitle" class="text-sm font-bold text-amber-300 pt-0.5">
+                遊戲一：英打挑戰 × 硬體配對
+              </div>
+            </div>
+
+            <p class="text-xs text-slate-400 leading-relaxed">
+              請注視教室前方大螢幕。待老師在主控台按下<span class="text-emerald-400 font-semibold">「開始遊戲」</span>後，畫面將自動解鎖並正式開始！
+            </p>
+
+            <div class="pt-1 flex items-center justify-center gap-2 text-xs text-emerald-400">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              <span>已成功連線至伺服器 • 靜候發布</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- iframe 遊戲舞台 -->
+        <iframe
+          id="game-stage"
+          src=""
+          class="w-full h-full border-0 rounded-b-xl"
+          style="min-height: calc(100vh - 140px);"
+          allow="autoplay"
+        ></iframe>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="py-4 text-center text-xs text-slate-600 border-t border-slate-900">
+    國高中資訊科技課堂互動教材 • 結合二進位解碼與硬體知識評量
+  </footer>
+
+  <script>
+    // 遊戲列表陣列
+    const games = [
+      { id: 'game1', name: '遊戲一：英打挑戰 × 硬體配對', path: 'games/game1.html' },
+      { id: 'game2', name: '遊戲二：二進位解密 × 硬體連連看', path: 'games/game2.html' },
+      { id: 'game3', name: '遊戲三：迷霧探索與二進位對決', path: 'games/game3.html' }
+    ];
+
+    let currentGameId = 'game1';
+    let isGameStarted = false;
+
+    // 依照老師指定的遊戲更新學生選單（限制學生選單：只顯示當前指派的遊戲，禁止學生自行挑選其他遊戲）
+    function renderGameMenu() {
+      const menuContainer = document.getElementById('gameMenu');
+      if (!menuContainer) return;
+      menuContainer.innerHTML = '';
+
+      const currentGame = games.find(g => g.id === currentGameId) || games[0];
+
+      // 建立只顯示目前指派遊戲的提示標籤（不提供其他遊戲按鈕）
+      const badge = document.createElement('div');
+      badge.className = 'inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-sm shadow-cyan-500/20';
+      badge.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+        <span class="text-slate-400 text-[11px]">老師指派：</span>
+        <span class="font-bold text-white tracking-wide">${currentGame.name}</span>
+      `;
+      menuContainer.appendChild(badge);
+
+      // 同步更新等待遮罩中的遊戲名稱
+      const waitingTitle = document.getElementById('waitingGameTitle');
+      if (waitingTitle) {
+        waitingTitle.textContent = currentGame.name;
+      }
+    }
+
+    // 控制等待遮罩顯示/隱藏
+    function setWaitingOverlay(show) {
+      const overlay = document.getElementById('waitingOverlay');
+      if (!overlay) return;
+      if (show) {
+        overlay.classList.remove('hidden');
+      } else {
+        overlay.classList.add('hidden');
+      }
+    }
+
+    // 切換遊戲並更新 iframe src 與選單標籤
+    function switchGame(gameId, forceReload = false) {
+      const game = games.find(g => g.id === gameId);
+      if (!game) return;
+
+      const isChanged = currentGameId !== game.id;
+      currentGameId = game.id;
+      renderGameMenu();
+
+      const iframe = document.getElementById('game-stage');
+      if (iframe) {
+        const currentSrc = iframe.getAttribute('src') || '';
+        if (forceReload || isChanged || !currentSrc || !currentSrc.includes(game.path)) {
+          // 加上時間戳參數以徹底清除上一局遊戲快取與狀態
+          iframe.src = `${game.path}?t=${Date.now()}`;
+        }
+      }
+    }
+
+    // 重新載入 iframe 徹底重置遊戲狀態與起點位置
+    function reloadGameIframe() {
+      const iframe = document.getElementById('game-stage');
+      if (!iframe) return;
+      const game = games.find(g => g.id === currentGameId) || games[0];
+      iframe.src = `${game.path}?t=${Date.now()}`;
+    }
+
+    // 初始化動態選單
+    renderGameMenu();
+
+    // 預先生成學生下拉選單
+    const studentSelect = document.getElementById('studentSelect');
+    for (let i = 1; i <= 30; i++) {
+      const id = `s${String(i).padStart(2, '0')}`;
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = `${id} (第 ${i} 號)`;
+      studentSelect.appendChild(opt);
+    }
+
+    // Tab 切換
+    function switchTab(type) {
+      sound.playTick();
+      const tabStudent = document.getElementById('tabStudent');
+      const tabTeacher = document.getElementById('tabTeacher');
+      const studentPanel = document.getElementById('studentPanel');
+      const teacherPanel = document.getElementById('teacherPanel');
+
+      if (type === 'student') {
+        tabStudent.className = 'flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-white bg-cyan-600 shadow-md';
+        tabTeacher.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        studentPanel.classList.remove('hidden');
+        teacherPanel.classList.add('hidden');
+      } else {
+        tabTeacher.className = 'flex-1 py-2.5 rounded-lg text-sm font-bold transition-all text-white bg-purple-600 shadow-md';
+        tabStudent.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all text-slate-400 hover:text-slate-200';
+        teacherPanel.classList.remove('hidden');
+        studentPanel.classList.add('hidden');
+      }
+    }
+
+    // 學生登入：存入 localStorage 並進入遊戲舞台
+    function loginAsStudent() {
+      sound.playKey();
+      const manual = document.getElementById('manualStudentInput').value.trim().toLowerCase();
+      const selected = document.getElementById('studentSelect').value;
+      const studentId = manual || selected;
+      
+      if (!studentId) {
+        alert('請輸入或選擇學號');
+        return;
+      }
+      
+      // 依 PROMPT_RULES.md 資料傳遞標準：寫入 localStorage
+      localStorage.setItem('studentId', studentId);
+
+      // 切換至遊戲舞台
+      document.getElementById('loginPanel').classList.add('hidden');
+      document.getElementById('gameStageWrapper').classList.remove('hidden');
+      document.getElementById('gameStageStudentLabel').innerText = `🎓 ${studentId.toUpperCase()} 已登入`;
+
+      const waitingInfo = document.getElementById('waitingStudentInfo');
+      if (waitingInfo) {
+        waitingInfo.innerText = `座號：${studentId.toUpperCase()} • 已連線待命中`;
+      }
+
+      // 載入當前老師指派的遊戲
+      switchGame(currentGameId);
+
+      // 若老師尚未開始遊戲，先鎖定在等待遮罩畫面
+      if (!isGameStarted) {
+        setWaitingOverlay(true);
+      } else {
+        setWaitingOverlay(false);
+      }
+    }
+
+    // 登出：清除 localStorage 並回到登入面板
+    function logoutStudent() {
+      localStorage.removeItem('studentId');
+      const iframe = document.getElementById('game-stage');
+      if (iframe) iframe.src = '';
+      document.getElementById('gameStageWrapper').classList.add('hidden');
+      document.getElementById('loginPanel').classList.remove('hidden');
+    }
+
+    // 支援 Enter 鍵
+    document.getElementById('manualStudentInput').addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') loginAsStudent();
+    });
+
+    // ── Socket 通訊 ──────────────────────────────────────────
+    const socket = io();
+
+    // 輔助函式：轉換遊戲編號並切換
+    function loadGameInIframe(gameNum, forceReload = false) {
+      const targetId = String(gameNum).startsWith('game') ? String(gameNum) : `game${gameNum}`;
+      switchGame(targetId, forceReload);
+    }
+
+    // 1. 監聽老師切換遊戲模組（限制學生選單並載入對應遊戲）
+    socket.on('game_switched', (data) => {
+      if (data && data.currentGame) {
+        loadGameInIframe(data.currentGame, true);
+      }
+    });
+
+    // 2. 監聽老師手動切換關卡
+    socket.on('stage_changed', (data) => {
+      if (data && data.currentGame) {
+        loadGameInIframe(data.currentGame);
+      }
+    });
+
+    // 3. 監聽老師點擊「開始遊戲」（解除等待遮罩，學生正式開始操作）
+    socket.on('game_started', (data) => {
+      isGameStarted = true;
+      if (data && data.currentGame) {
+        loadGameInIframe(data.currentGame);
+      }
+      setWaitingOverlay(false);
+      if (window.sound && typeof sound.playVictory === 'function') {
+        sound.playVictory();
+      }
+    });
+
+    // 4. 監聽老師點擊「重新開始 / 重置遊戲」（恢復等待鎖定，重新載入 iframe 清除上一局狀態與位置）
+    socket.on('game_reset', () => {
+      isGameStarted = false;
+      setWaitingOverlay(true);
+      reloadGameIframe();
+      if (window.sound && typeof sound.playTick === 'function') {
+        sound.playTick();
+      }
+    });
+
+    // 5. 伺服器狀態同步（全域狀態與在線狀態校正）
+    socket.on('state_sync', (state) => {
+      if (state.currentGame) {
+        const targetId = `game${state.currentGame}`;
+        if (targetId !== currentGameId) {
+          loadGameInIframe(state.currentGame);
+        }
+      }
+
+      if (state.status === 'in_progress') {
+        isGameStarted = true;
+        setWaitingOverlay(false);
+      } else if (state.status === 'waiting') {
+        isGameStarted = false;
+        const wrapper = document.getElementById('gameStageWrapper');
+        if (wrapper && !wrapper.classList.contains('hidden')) {
+          setWaitingOverlay(true);
+        }
+      }
+    });
+
+    function loginAsTeacher() {
+      sound.playKey();
+      const u = document.getElementById('teacherUsername').value.trim();
+      const p = document.getElementById('teacherPassword').value.trim();
+      const errBox = document.getElementById('teacherError');
+
+      socket.emit('teacher_auth', { username: u, password: p }, (res) => {
+        if (res && res.success) {
+          sessionStorage.setItem('teacherAuth', 'true');
+          window.location.href = '/teacher.html';
+        } else {
+          errBox.textContent = res ? res.message : '登入失敗，請檢查帳號密碼';
+          errBox.classList.remove('hidden');
+        }
+      });
+    }
+
+    document.getElementById('teacherPassword').addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') loginAsTeacher();
+    });
+  </script>
+</body>
+</html>
