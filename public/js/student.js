@@ -103,9 +103,17 @@ socket.on('state_sync', (state) => {
 });
 
 // 老師點擊「遊戲開始」廣播
-socket.on('game_started', () => {
+socket.on('game_started', (data) => {
   sound.playVictory();
-  showStage1();
+  if (data && data.currentGame === 4) {
+    window.location.href = '/games/game4.html';
+  } else if (data && data.currentGame === 3) {
+    window.location.href = '/games/game3.html';
+  } else if (data && data.currentGame === 2) {
+    window.location.href = '/games/game2.html';
+  } else {
+    showStage1();
+  }
 });
 
 // 老師重置廣播
@@ -117,28 +125,52 @@ socket.on('game_reset', () => {
 
 // 更新大廳 UI
 function updateLobbyUI(gameState) {
-  if (!myGroup) return;
+  // 更新在線人數顯示
+  const onlineText = document.getElementById('studentLobbyOnlineText');
+  if (onlineText) {
+    const onlineCount = gameState.onlineCount || (gameState.onlineStudents ? gameState.onlineStudents.length : 0);
+    onlineText.innerText = `大廳連線人數：${onlineCount} / ${gameState.numStudents || 30} 人`;
+  }
 
-  groupBadge.innerText = myGroup.name;
-  groupBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
-  waitingGroupText.innerHTML = `您已被分配到 <span class="text-cyan-400 font-extrabold text-lg">${myGroup.name}</span>`;
+  const instruction = document.getElementById('studentLobbyInstruction');
+
+  if (gameState.status === 'GROUPED') {
+    if (myGroup) {
+      groupBadge.innerText = myGroup.name;
+      groupBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
+      waitingGroupText.innerHTML = `分組成功！您被分配到 <span class="text-cyan-400 font-extrabold text-lg">${myGroup.name}</span>`;
+    }
+    if (instruction) {
+      instruction.innerText = '小隊組員已就緒！請等待老師點擊【開始遊戲】，畫面將自動跳轉進入解密畫面！';
+    }
+  } else {
+    // LOBBY 等待大廳
+    groupBadge.innerText = '等待分組中...';
+    groupBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700';
+    waitingGroupText.innerText = '等待老師開始遊戲與分組中...';
+    if (instruction) {
+      instruction.innerText = '老師正在前方主控台進行分組與準備。請等待老師點擊「開始遊戲」，畫面將自動切換！';
+    }
+  }
 
   // 隊友清單
-  teammatesList.innerHTML = '';
-  const members = myGroup.members || [];
-  memberCountText.innerText = `${members.length} 人`;
+  if (myGroup) {
+    teammatesList.innerHTML = '';
+    const members = myGroup.members || [];
+    memberCountText.innerText = `${members.length} 人`;
 
-  members.forEach(mId => {
-    const isMe = mId === myStudentId;
-    const isOnline = gameState.students[mId] && gameState.students[mId].online;
-    const span = document.createElement('span');
-    span.className = `px-2 py-1 rounded-lg border flex items-center gap-1.5 ${isMe ? 'bg-cyan-600/30 text-cyan-300 border-cyan-500/50 font-bold' : (isOnline ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-950 text-slate-500 border-slate-800')}`;
-    span.innerHTML = `
-      <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
-      <span>${mId}${isMe ? ' (我)' : ''}</span>
-    `;
-    teammatesList.appendChild(span);
-  });
+    members.forEach(mId => {
+      const isMe = mId === myStudentId;
+      const isOnline = gameState.students[mId] && gameState.students[mId].online;
+      const span = document.createElement('span');
+      span.className = `px-2 py-1 rounded-lg border flex items-center gap-1.5 ${isMe ? 'bg-cyan-600/30 text-cyan-300 border-cyan-500/50 font-bold' : (isOnline ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-950 text-slate-500 border-slate-800')}`;
+      span.innerHTML = `
+        <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
+        <span>${mId}${isMe ? ' (我)' : ''}</span>
+      `;
+      teammatesList.appendChild(span);
+    });
+  }
 }
 
 // 根據後端狀態切換顯示畫面
@@ -149,8 +181,14 @@ function checkGameState(gameState) {
     showVictoryScreen();
   } else if (myStudentData.stage1Score !== null && myStudentData.stage2Score === null) {
     showStage2();
-  } else if (gameState.status === 'in_progress') {
-    if (!stage1Completed && myStudentData.stage1Score === null) {
+  } else if (gameState.status === 'GAME_START' || gameState.status === 'in_progress') {
+    if (gameState.currentGame === 4) {
+      window.location.href = '/games/game4.html';
+    } else if (gameState.currentGame === 3) {
+      window.location.href = '/games/game3.html';
+    } else if (gameState.currentGame === 2) {
+      window.location.href = '/games/game2.html';
+    } else if (!stage1Completed && myStudentData.stage1Score === null) {
       showStage1();
     }
   } else {

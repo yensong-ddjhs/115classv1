@@ -132,36 +132,74 @@
 
       <!-- 遊戲舞台與等待遮罩容器 -->
       <div class="relative w-full flex-1" style="min-height: calc(100vh - 140px);">
-        <!-- 等待老師開始遮罩 (預設顯示，直到老師按下開始遊戲才解鎖) -->
-        <div id="waitingOverlay" class="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/92 backdrop-blur-md p-6 text-center transition-all duration-300 rounded-b-xl">
-          <div class="max-w-md w-full bg-slate-900/95 border border-cyan-500/30 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-cyan-950/60 space-y-5">
-            <div class="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 mx-auto flex items-center justify-center text-3xl animate-bounce">
+        <!-- 等待老師開始遮罩 (支援 LOBBY 等待大廳 與 GROUPED 分組完成狀態) -->
+        <div id="waitingOverlay" class="absolute inset-0 z-30 flex flex-col items-center justify-center bg-slate-950/94 backdrop-blur-md p-6 text-center transition-all duration-300 rounded-b-xl overflow-y-auto">
+          <div class="max-w-lg w-full bg-slate-900/95 border border-cyan-500/30 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-cyan-950/60 space-y-5 my-auto">
+            
+            <!-- 動態圖示 -->
+            <div id="lobbyStateIcon" class="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 mx-auto flex items-center justify-center text-3xl animate-bounce">
               ⏳
             </div>
             
+            <!-- 狀態標題與主提示 -->
             <div class="space-y-1.5">
-              <h3 class="text-xl font-bold text-white tracking-wide">等待老師開始遊戲</h3>
-              <p id="waitingStudentInfo" class="text-xs font-mono text-cyan-300"></p>
+              <h3 id="lobbyStateTitle" class="text-xl sm:text-2xl font-black text-white tracking-wide">
+                等待老師開始遊戲與分組中...
+              </h3>
+              <p id="waitingStudentInfo" class="text-xs font-mono text-cyan-300 font-semibold"></p>
+            </div>
+
+            <!-- 狀態 A: 等待大廳 (LOBBY) 在線人數與清單 -->
+            <div id="lobbyInfoBox" class="p-4 rounded-xl bg-slate-950/80 border border-slate-800 text-left space-y-3">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-400 font-bold">📡 大廳已登入人數：</span>
+                <span id="lobbyOnlineCount" class="font-mono font-black text-emerald-400 text-sm">0 人在線</span>
+              </div>
+              <div>
+                <div class="text-[11px] text-slate-400 mb-1.5">已成功進入大廳的座號：</div>
+                <div id="lobbyOnlineList" class="flex flex-wrap gap-1.5 text-xs font-mono max-h-24 overflow-y-auto">
+                  <span class="text-slate-500 italic text-[11px]">等待同學登入...</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 狀態 B: 分組成功提示 (GROUPED) -->
+            <div id="groupedInfoBox" class="hidden p-4 rounded-xl bg-gradient-to-br from-cyan-950/40 to-slate-950 border border-cyan-500/40 text-left space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-cyan-300 uppercase tracking-wider">🎉 分組成功！</span>
+                <span id="groupedNameBadge" class="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                  第 - 組
+                </span>
+              </div>
+              <div class="text-xs text-slate-300">
+                您被分配至 <span id="groupedNameText" class="font-black text-cyan-300 text-sm">第 - 組</span>
+              </div>
+              <div>
+                <div class="text-[11px] text-slate-400 mb-1.5">同組組員名單：</div>
+                <div id="groupedTeammatesList" class="flex flex-wrap gap-1.5 text-xs font-mono">
+                  <!-- 動態插入 -->
+                </div>
+              </div>
             </div>
 
             <!-- 目前指派遊戲卡片 -->
             <div class="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-left space-y-1">
               <div class="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
                 <span>目前指派遊戲</span>
-                <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">鎖定中</span>
+                <span id="gameLockBadge" class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">鎖定等待中</span>
               </div>
               <div id="waitingGameTitle" class="text-sm font-bold text-amber-300 pt-0.5">
                 遊戲一：英打挑戰 × 硬體配對
               </div>
             </div>
 
-            <p class="text-xs text-slate-400 leading-relaxed">
-              請注視教室前方大螢幕。待老師在主控台按下<span class="text-emerald-400 font-semibold">「開始遊戲」</span>後，畫面將自動解鎖並正式開始！
+            <p id="lobbyInstructionText" class="text-xs text-slate-400 leading-relaxed">
+              請注視教室前方大螢幕。待老師在主控台完成分組並點擊<span class="text-emerald-400 font-semibold">「開始遊戲」</span>後，全體學生畫面將同步解鎖跳轉！
             </p>
 
             <div class="pt-1 flex items-center justify-center gap-2 text-xs text-emerald-400">
               <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-              <span>已成功連線至伺服器 • 靜候發布</span>
+              <span>WebSocket 毫秒級通訊連線中</span>
             </div>
           </div>
         </div>
@@ -184,15 +222,17 @@
   </footer>
 
   <script>
-    // 遊戲列表陣列
+    // 遊戲列表陣列 (新增遊戲四：凱撒摩斯密碼小隊對決)
     const games = [
       { id: 'game1', name: '遊戲一：英打挑戰 × 硬體配對', path: 'games/game1.html' },
       { id: 'game2', name: '遊戲二：二進位解密 × 硬體連連看', path: 'games/game2.html' },
-      { id: 'game3', name: '遊戲三：迷霧探索與二進位對決', path: 'games/game3.html' }
+      { id: 'game3', name: '遊戲三：迷霧探索與二進位對決', path: 'games/game3.html' },
+      { id: 'game4', name: '遊戲四：凱撒摩斯密碼小隊對決', path: 'games/game4.html' }
     ];
 
     let currentGameId = 'game1';
     let isGameStarted = false;
+    let loggedStudentId = localStorage.getItem('studentId') || '';
 
     // 依照老師指定的遊戲更新學生選單（限制學生選單：只顯示當前指派的遊戲，禁止學生自行挑選其他遊戲）
     function renderGameMenu() {
@@ -303,8 +343,12 @@
         return;
       }
       
+      loggedStudentId = studentId;
       // 依 PROMPT_RULES.md 資料傳遞標準：寫入 localStorage
       localStorage.setItem('studentId', studentId);
+
+      // 發送加入事件給後端以更新連線與大廳名單
+      socket.emit('student_join', { studentId: studentId });
 
       // 切換至遊戲舞台
       document.getElementById('loginPanel').classList.add('hidden');
@@ -319,7 +363,7 @@
       // 載入當前老師指派的遊戲
       switchGame(currentGameId);
 
-      // 若老師尚未開始遊戲，先鎖定在等待遮罩畫面
+      // 依當前遊戲狀態控制遮罩
       if (!isGameStarted) {
         setWaitingOverlay(true);
       } else {
@@ -330,6 +374,7 @@
     // 登出：清除 localStorage 並回到登入面板
     function logoutStudent() {
       localStorage.removeItem('studentId');
+      loggedStudentId = '';
       const iframe = document.getElementById('game-stage');
       if (iframe) iframe.src = '';
       document.getElementById('gameStageWrapper').classList.add('hidden');
@@ -348,6 +393,84 @@
     function loadGameInIframe(gameNum, forceReload = false) {
       const targetId = String(gameNum).startsWith('game') ? String(gameNum) : `game${gameNum}`;
       switchGame(targetId, forceReload);
+    }
+
+    // 渲染等待大廳狀態機 UI
+    function renderLobbyStatusMachine(state) {
+      const status = state.status;
+      const onlineCount = state.onlineCount || (state.onlineStudents ? state.onlineStudents.length : 0);
+      const onlineStudents = state.onlineStudents || [];
+
+      // 更新在線人數與名單
+      const countEl = document.getElementById('lobbyOnlineCount');
+      if (countEl) countEl.innerText = `${onlineCount} / ${state.numStudents || 30} 人在線`;
+
+      const listEl = document.getElementById('lobbyOnlineList');
+      if (listEl) {
+        if (onlineStudents.length === 0) {
+          listEl.innerHTML = '<span class="text-slate-500 italic text-[11px]">等待同學登入...</span>';
+        } else {
+          listEl.innerHTML = onlineStudents.map(sId => {
+            const isMe = sId === loggedStudentId;
+            return `
+              <span class="px-2 py-0.5 rounded-md border text-xs font-mono flex items-center gap-1 ${isMe ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400 font-bold' : 'bg-slate-900 text-slate-300 border-slate-700'}">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                ${sId}${isMe ? ' (我)' : ''}
+              </span>
+            `;
+          }).join('');
+        }
+      }
+
+      const lobbyIcon = document.getElementById('lobbyStateIcon');
+      const lobbyTitle = document.getElementById('lobbyStateTitle');
+      const lobbyInfoBox = document.getElementById('lobbyInfoBox');
+      const groupedInfoBox = document.getElementById('groupedInfoBox');
+      const instructionText = document.getElementById('lobbyInstructionText');
+
+      // 判斷當前全域狀態
+      if (status === 'GROUPED') {
+        // 完成分組狀態
+        if (lobbyIcon) lobbyIcon.innerText = '👥';
+        if (lobbyTitle) lobbyTitle.innerText = '分組完成！請確認您的組別';
+        if (lobbyInfoBox) lobbyInfoBox.classList.add('hidden');
+        if (groupedInfoBox) groupedInfoBox.classList.remove('hidden');
+
+        // 渲染該學生的組別資訊
+        if (loggedStudentId && state.students && state.students[loggedStudentId]) {
+          const myGroupId = state.students[loggedStudentId].groupId;
+          const myGroup = state.groups && state.groups[myGroupId];
+          if (myGroup) {
+            document.getElementById('groupedNameBadge').innerText = myGroup.name;
+            document.getElementById('groupedNameText').innerText = myGroup.name;
+
+            const tmList = document.getElementById('groupedTeammatesList');
+            const members = myGroup.members || [];
+            tmList.innerHTML = members.map(mId => {
+              const isMe = mId === loggedStudentId;
+              const isOnline = state.students[mId] && state.students[mId].online;
+              return `
+                <span class="px-2 py-0.5 rounded-md border text-xs font-mono flex items-center gap-1 ${isMe ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400 font-bold' : (isOnline ? 'bg-slate-900 text-slate-200 border-slate-700' : 'bg-slate-950 text-slate-500 border-slate-800')}">
+                  <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
+                  ${mId}${isMe ? ' (我)' : ''}
+                </span>
+              `;
+            }).join('');
+          }
+        }
+        if (instructionText) {
+          instructionText.innerHTML = '已完成小隊分組！請等待老師點擊<span class="text-emerald-400 font-semibold">「開始遊戲」</span>，畫面將自動跳轉進入解密畫面！';
+        }
+      } else {
+        // LOBBY 等待大廳狀態
+        if (lobbyIcon) lobbyIcon.innerText = '⏳';
+        if (lobbyTitle) lobbyTitle.innerText = '等待老師開始遊戲與分組中...';
+        if (lobbyInfoBox) lobbyInfoBox.classList.remove('hidden');
+        if (groupedInfoBox) groupedInfoBox.classList.add('hidden');
+        if (instructionText) {
+          instructionText.innerHTML = '請注視教室前方大螢幕。待老師在主控台完成分組並點擊<span class="text-emerald-400 font-semibold">「開始遊戲」</span>後，全體學生畫面將同步解鎖跳轉！';
+        }
+      }
     }
 
     // 1. 監聽老師切換遊戲模組（限制學生選單並載入對應遊戲）
@@ -395,16 +518,26 @@
         }
       }
 
-      if (state.status === 'in_progress') {
+      renderLobbyStatusMachine(state);
+
+      if (state.status === 'GAME_START' || state.status === 'in_progress') {
         isGameStarted = true;
         setWaitingOverlay(false);
-      } else if (state.status === 'waiting') {
+      } else {
         isGameStarted = false;
         const wrapper = document.getElementById('gameStageWrapper');
         if (wrapper && !wrapper.classList.contains('hidden')) {
           setWaitingOverlay(true);
         }
       }
+    });
+
+    // 監聽分組就緒廣播
+    socket.on('groups_prepared', (data) => {
+      socket.emit('state_sync');
+    });
+    socket.on('groups_updated', (data) => {
+      socket.emit('state_sync');
     });
 
     function loginAsTeacher() {

@@ -43,11 +43,52 @@ const GROUP_META = [
   { name: '第 6 組', code: 'F', color: '#ec4899', spawn: { x: 500, y: 520 } }
 ];
 
+// 摩斯密碼字典
+const MORSE_MAP = {
+  'A': '.-',    'B': '-...',  'C': '-.-.',  'D': '-..',   'E': '.',
+  'F': '..-.',  'G': '--.',   'H': '....',  'I': '..',    'J': '.---',
+  'K': '-.-',   'L': '.-..',  'M': '--',    'N': '-.',    'O': '---',
+  'P': '.--.',  'Q': '--.-',  'R': '.-.',   'S': '...',   'T': '-',
+  'U': '..-',   'V': '...-',  'W': '.--',   'X': '-..-',  'Y': '-.--',
+  'Z': '--..'
+};
+
+// 凱撒位移 +2 (A->C, Z->B, 大小寫統一為大寫)
+function caesarShift2Char(ch) {
+  const code = ch.toUpperCase().charCodeAt(0);
+  if (code >= 65 && code <= 90) {
+    return String.fromCharCode(((code - 65 + 2) % 26) + 65);
+  }
+  return ch.toUpperCase();
+}
+
+function caesarShift2Str(str) {
+  return str.split('').map(caesarShift2Char).join('');
+}
+
+function textToMorse(str) {
+  return str.toUpperCase().split('').map(c => MORSE_MAP[c] || '').filter(Boolean).join(' ');
+}
+
+function charToMorse(ch) {
+  return MORSE_MAP[ch.toUpperCase()] || '';
+}
+
+// 取得當前在線學生座號清單
+function getOnlineStudentIds() {
+  if (!gameState || !gameState.students) return [];
+  return Object.values(gameState.students)
+    .filter(s => s.online)
+    .map(s => s.id)
+    .sort();
+}
+
 // 系統核心狀態
+// 狀態機包含: 'LOBBY' (等待大廳) -> 'GROUPED' (完成分組/準備階段) -> 'GAME_START' (遊戲進行中) -> 'GAME_OVER' (結算)
 let gameState = {
-  status: 'waiting',    // 'waiting' | 'in_progress' | 'ended'
-  currentGame: 1,       // 目前發布的遊戲模組編號 (1 = game1.html, 2 = game2.html, 3 = game3.html)
-  currentStage: 1,      // 目前關卡編號 (給同一遊戲內的多關卡使用)
+  status: 'LOBBY',      // 'LOBBY' | 'GROUPED' | 'GAME_START' | 'GAME_OVER' (相容 waiting, in_progress)
+  currentGame: 1,       // 目前發布的遊戲模組編號 (1 = game1, 2 = game2, 3 = game3, 4 = game4)
+  currentStage: 1,      // 目前關卡編號
   numStudents: 30,
   numGroups: 5,
   groups: {},   // { group_1: { id: 'group_1', name: '第 1 組', members: ['s01', ...], score: 0 }, ... }
@@ -60,8 +101,65 @@ let gameState = {
     activeBattles: {},
     cooldowns: {},
     ended: false
+  },
+  game4: {
+    round: 1,
+    totalRounds: 5,
+    turnGroupIndex: 0,
+    turnGroup: 'group_1',
+    phase: 'submitting_words', // 'submitting_words' | 'decrypting' | 'round_result' | 'game_over'
+    groupInputs: {}, // { 's01': { letter: 'A', shifted: 'C', morse: '-.-.' } }
+    originalWord: '',
+    shiftedWord: '',
+    morseCode: '',
+    submissions: {}, // { [groupId]: { groupId, groupName, studentId, answer, correctCount, totalCount, scoreEarned, timeTaken, submittedAt } }
+    groupScores: {},
+    history: []
   }
 };
+
+// 格式化發送給客戶端的狀態包 (附帶在線統計)
+function getSyncPayload() {
+  const onlineIds = getOnlineStudentIds();
+  return {
+    ...gameState,
+    onlineCount: onlineIds.length,
+    onlineStudents: onlineIds,
+    // 提供相容欄位給舊版客戶端比對
+    isLobby: gameState.status === 'LOBBY' || gameState.status === 'waiting',
+    isGrouped: gameState.status === 'GROUPED',
+    isStarted: gameState.status === 'GAME_START' || gameState.status === 'in_progress'
+  };
+}
+
+// 初始化遊戲四狀態
+function initGame4State(resetScores = false) {
+  const groupKeys = Object.keys(gameState.groups).sort();
+  const numGroups = groupKeys.length || 5;
+
+  const prevScores = (gameState.game4 && !resetScores) ? gameState.game4.groupScores : {};
+  const groupScores = {};
+  groupKeys.forEach(gId => {
+    groupScores[gId] = prevScores[gId] || 0;
+  });
+
+  const firstTurnGroup = groupKeys[0] || 'group_1';
+
+  gameState.game4 = {
+    round: 1,
+    totalRounds: numGroups,
+    turnGroupIndex: 0,
+    turnGroup: firstTurnGroup,
+    phase: 'submitting_words',
+    groupInputs: {},
+    originalWord: '',
+    shiftedWord: '',
+    morseCode: '',
+    submissions: {},
+    groupScores: groupScores,
+    history: []
+  };
+}
 
 // 初始化預設分組
 function initializeDefaultGroups(numStudents = 30, numGroups = 5) {
@@ -99,6 +197,7 @@ function initializeDefaultGroups(numStudents = 30, numGroups = 5) {
   }
 
   initStage3Players();
+  initGame4State(true);
 }
 
 // 初始化遊戲三地圖角色與狀態
@@ -155,7 +254,7 @@ app.get('/api/info', (req, res) => {
 
 io.on('connection', (socket) => {
   // 發送目前狀態給新連線的客戶端
-  socket.emit('state_sync', gameState);
+  socket.emit('state_sync', getSyncPayload());
 
   // 老師登入驗證
   socket.on('teacher_auth', (data, callback) => {
@@ -202,13 +301,34 @@ io.on('connection', (socket) => {
     socket.emit('student_ready', {
       student: gameState.students[studentId],
       group: gameState.groups[gameState.students[studentId].groupId],
-      gameState: gameState
+      gameState: getSyncPayload()
     });
+
+    // 廣播最新在線狀態給全體 (大廳即時人數與名單更新)
+    io.emit('state_sync', getSyncPayload());
 
     // 廣播給老師端更新連線名單
     io.to('teachers').emit('student_status_changed', {
       studentId: studentId,
       online: true,
+      students: gameState.students,
+      onlineStudents: getOnlineStudentIds()
+    });
+  });
+
+  // 老師控制：進入等待大廳 (LOBBY)
+  socket.on('teacher_enter_lobby', () => {
+    gameState.status = 'LOBBY';
+    io.emit('state_sync', getSyncPayload());
+    io.emit('lobby_ready');
+  });
+
+  // 老師控制：進入控制主頁 / 準備階段 (GROUPED)
+  socket.on('teacher_enter_grouped', () => {
+    gameState.status = 'GROUPED';
+    io.emit('state_sync', getSyncPayload());
+    io.emit('groups_prepared', {
+      groups: gameState.groups,
       students: gameState.students
     });
   });
@@ -218,7 +338,8 @@ io.on('connection', (socket) => {
     const numStudents = Math.max(2, Math.min(60, parseInt(data.numStudents) || 30));
     const numGroups = Math.max(2, Math.min(12, parseInt(data.numGroups) || 5));
 
-    gameState.status = 'waiting';
+    // 分組後狀態進入 GROUPED 準備階段
+    gameState.status = 'GROUPED';
     gameState.numStudents = numStudents;
     gameState.numGroups = numGroups;
     gameState.groups = {};
@@ -266,23 +387,29 @@ io.on('connection', (socket) => {
     });
 
     initStage3Players();
+    initGame4State(true);
 
-    // 全體廣播新狀態
-    io.emit('state_sync', gameState);
+    // 全體廣播新狀態與分組通知
+    io.emit('groups_updated', {
+      groups: gameState.groups,
+      students: gameState.students
+    });
+    io.emit('state_sync', getSyncPayload());
   });
 
   // 老師點擊「開始遊戲」（可帶入指定 game 與 stage）
   socket.on('start_game', (data) => {
-    gameState.status = 'in_progress';
+    gameState.status = 'GAME_START';
     // 若老師指定了遊戲模組 / 關卡，則更新；否則沿用目前設定
     if (data && data.game)  gameState.currentGame  = parseInt(data.game)  || 1;
     if (data && data.stage) gameState.currentStage = parseInt(data.stage) || 1;
 
     io.emit('game_started', {
       currentGame:  gameState.currentGame,
-      currentStage: gameState.currentStage
+      currentStage: gameState.currentStage,
+      status: gameState.status
     });
-    io.emit('state_sync', gameState);
+    io.emit('state_sync', getSyncPayload());
   });
 
   // 老師手動切換關卡（不重置進度，直接跳至指定 stage）
@@ -314,8 +441,9 @@ io.on('connection', (socket) => {
   });
 
   // 老師點擊「重置遊戲」
+  // 老師點擊「重置遊戲」
   socket.on('reset_game', () => {
-    gameState.status = 'waiting';
+    gameState.status = 'LOBBY';
     Object.keys(gameState.groups).forEach(gId => {
       gameState.groups[gId].score = 0;
     });
@@ -327,9 +455,365 @@ io.on('connection', (socket) => {
     });
 
     initStage3Players();
+    initGame4State(true);
 
     io.emit('game_reset');
-    io.emit('state_sync', gameState);
+    io.emit('state_sync', getSyncPayload());
+  });
+
+  // ====================================================
+  // 遊戲四 (凱撒摩斯密碼小隊對決 Caesar-Morse Duel) Socket 事件與核心邏輯
+  // ====================================================
+
+  // 輔助函式：結算遊戲四當前回合
+  function finishGame4Round() {
+    if (!gameState.game4 || gameState.game4.phase === 'round_result' || gameState.game4.phase === 'game_over') return;
+
+    gameState.game4.phase = 'round_result';
+
+    // 結算各解密組得分
+    const roundScores = {};
+    const submissions = gameState.game4.submissions || {};
+
+    Object.keys(submissions).forEach(gId => {
+      const sub = submissions[gId];
+      const pts = sub.scoreEarned || 0;
+      roundScores[gId] = pts;
+
+      gameState.game4.groupScores[gId] = (gameState.game4.groupScores[gId] || 0) + pts;
+      if (gameState.groups[gId]) {
+        gameState.groups[gId].score += pts;
+      }
+    });
+
+    const roundRecord = {
+      round: gameState.game4.round,
+      turnGroup: gameState.game4.turnGroup,
+      turnGroupName: gameState.groups[gameState.game4.turnGroup]?.name || gameState.game4.turnGroup,
+      originalWord: gameState.game4.originalWord,
+      shiftedWord: gameState.game4.shiftedWord,
+      morseCode: gameState.game4.morseCode,
+      submissions: submissions,
+      roundScores: roundScores,
+      totalScores: { ...gameState.game4.groupScores }
+    };
+    gameState.game4.history.push(roundRecord);
+
+    io.emit('game4_round_settled', roundRecord);
+    io.emit('state_sync', getSyncPayload());
+  }
+
+  // 輔助函式：切換至遊戲四下一回合或結束遊戲
+  function advanceGame4NextRound() {
+    if (!gameState.game4) return;
+    const groupKeys = Object.keys(gameState.groups).sort();
+    const totalRounds = groupKeys.length || 5;
+
+    gameState.game4.round++;
+
+    if (gameState.game4.round > totalRounds) {
+      // 全體組別輪流出題完畢，進入 GAME_OVER
+      gameState.game4.phase = 'game_over';
+      gameState.status = 'GAME_OVER';
+
+      // 計算排行榜
+      const rankings = groupKeys.map(gId => ({
+        groupId: gId,
+        name: gameState.groups[gId]?.name || gId,
+        score: gameState.game4.groupScores[gId] || 0,
+        binaryScore: (gameState.game4.groupScores[gId] || 0).toString(2)
+      })).sort((a, b) => b.score - a.score);
+
+      const winner = rankings[0] || null;
+
+      io.emit('game4_game_over', {
+        rankings: rankings,
+        winner: winner,
+        totalScores: gameState.game4.groupScores
+      });
+      io.emit('state_sync', getSyncPayload());
+    } else {
+      // 輪替到下一組出題
+      gameState.game4.turnGroupIndex = (gameState.game4.round - 1) % groupKeys.length;
+      gameState.game4.turnGroup = groupKeys[gameState.game4.turnGroupIndex];
+      gameState.game4.phase = 'submitting_words';
+      gameState.game4.groupInputs = {};
+      gameState.game4.originalWord = '';
+      gameState.game4.shiftedWord = '';
+      gameState.game4.morseCode = '';
+      gameState.game4.submissions = {};
+
+      io.emit('game4_new_round', {
+        round: gameState.game4.round,
+        totalRounds: totalRounds,
+        turnGroup: gameState.game4.turnGroup,
+        turnGroupName: gameState.groups[gameState.game4.turnGroup]?.name || gameState.game4.turnGroup,
+        phase: 'submitting_words'
+      });
+      io.emit('state_sync', getSyncPayload());
+    }
+  }
+
+  // 請求遊戲四初始化狀態
+  socket.on('game4_init', (data, callback) => {
+    const studentId = (data?.studentId || socket.studentId || '').toLowerCase();
+    const student = gameState.students[studentId] || null;
+    const myGroupId = student ? student.groupId : null;
+
+    const payload = {
+      game4: gameState.game4,
+      studentId: studentId,
+      groupId: myGroupId,
+      groups: gameState.groups,
+      isTurnGroup: myGroupId === gameState.game4.turnGroup,
+      onlineCount: getOnlineStudentIds().length
+    };
+
+    if (typeof callback === 'function') callback(payload);
+    socket.emit('game4_ready', payload);
+  });
+
+  // 出題組組員輸入 1 個英文字母
+  socket.on('game4_submit_letter', (data) => {
+    if (!gameState.game4 || gameState.game4.phase !== 'submitting_words') return;
+
+    const studentId = (data?.studentId || socket.studentId || '').toLowerCase();
+    const student = gameState.students[studentId];
+    if (!student) return;
+
+    // 檢查是否為當前出題組
+    if (student.groupId !== gameState.game4.turnGroup) {
+      return;
+    }
+
+    const rawLetter = (data.letter || '').toString().trim().toUpperCase().replace(/[^A-Z]/g, '');
+    if (!rawLetter) return;
+    const letter = rawLetter[0];
+
+    const shifted = caesarShift2Char(letter);
+    const morse = charToMorse(shifted);
+
+    gameState.game4.groupInputs[studentId] = {
+      studentId: studentId,
+      letter: letter,
+      shifted: shifted,
+      morse: morse,
+      updatedAt: Date.now()
+    };
+
+    // 廣播給全體 (出題組全員及教師端即時查看)
+    io.emit('game4_inputs_updated', {
+      turnGroup: gameState.game4.turnGroup,
+      inputs: gameState.game4.groupInputs
+    });
+  });
+
+  // 出題組確認完成題目（或教師代為確認發布）
+  socket.on('game4_confirm_word', (data) => {
+    if (!gameState.game4 || gameState.game4.phase !== 'submitting_words') return;
+
+    const turnGroupMembers = gameState.groups[gameState.game4.turnGroup]?.members || [];
+    let composedLetters = [];
+
+    // 若有自訂或指定單字 (供教師端或測試使用)
+    if (data && data.customWord) {
+      composedLetters = data.customWord.toUpperCase().replace(/[^A-Z]/g, '').split('');
+    } else {
+      // 依成員順序提取輸入的字母
+      turnGroupMembers.forEach(mId => {
+        if (gameState.game4.groupInputs[mId]?.letter) {
+          composedLetters.push(gameState.game4.groupInputs[mId].letter);
+        }
+      });
+    }
+
+    // 若依然為空（如單人測試或組員未打字），隨機產生 4 個字母單字
+    if (composedLetters.length === 0) {
+      const fallbackWords = ['CODE', 'DATA', 'BYTE', 'JAVA', 'NODE', 'WIRE', 'CAMP', 'TEAM', 'WIFI'];
+      const chosen = fallbackWords[Math.floor(Math.random() * fallbackWords.length)];
+      composedLetters = chosen.split('');
+    }
+
+    const originalWord = composedLetters.join('');
+    const shiftedWord = caesarShift2Str(originalWord);
+    const morseCode = textToMorse(shiftedWord);
+
+    gameState.game4.originalWord = originalWord;
+    gameState.game4.shiftedWord = shiftedWord;
+    gameState.game4.morseCode = morseCode;
+    gameState.game4.phase = 'decrypting';
+    gameState.game4.submissions = {};
+
+    const broadcastPayload = {
+      round: gameState.game4.round,
+      turnGroup: gameState.game4.turnGroup,
+      turnGroupName: gameState.groups[gameState.game4.turnGroup]?.name || gameState.game4.turnGroup,
+      letterCount: originalWord.length,
+      morseCode: morseCode,
+      phase: 'decrypting'
+    };
+
+    io.emit('game4_word_broadcast', broadcastPayload);
+    io.emit('state_sync', getSyncPayload());
+  });
+
+  // 解密組組員提交解密答案
+  socket.on('game4_submit_decryption', (data, callback) => {
+    if (!gameState.game4 || gameState.game4.phase !== 'decrypting') {
+      if (typeof callback === 'function') callback({ success: false, message: '目前非答題階段' });
+      return;
+    }
+
+    const studentId = (data?.studentId || socket.studentId || '').toLowerCase();
+    const student = gameState.students[studentId];
+    if (!student) return;
+
+    // 出題組不能答題
+    if (student.groupId === gameState.game4.turnGroup) {
+      if (typeof callback === 'function') callback({ success: false, message: '出題組不可作答' });
+      return;
+    }
+
+    const rawAns = (data.answer || '').toString().trim().toUpperCase().replace(/[^A-Z]/g, '');
+    const targetWord = gameState.game4.originalWord || '';
+    const targetLen = targetWord.length;
+
+    // 逐字比對計算正確字母數
+    let correctCount = 0;
+    for (let i = 0; i < targetLen; i++) {
+      if (i < rawAns.length && rawAns[i] === targetWord[i]) {
+        correctCount++;
+      }
+    }
+    const scoreEarned = correctCount; // 全對得 N 分，對 k 個得 k 分，全錯 0 分
+
+    const timeTaken = parseFloat(data.timeTaken) || 0;
+    const groupId = student.groupId;
+    const groupName = gameState.groups[groupId]?.name || groupId;
+
+    const submissionData = {
+      groupId: groupId,
+      groupName: groupName,
+      studentId: studentId,
+      answer: rawAns,
+      targetLen: targetLen,
+      correctCount: correctCount,
+      scoreEarned: scoreEarned,
+      timeTaken: timeTaken,
+      submittedAt: Date.now()
+    };
+
+    // 取該組最高分或更新作答
+    if (!gameState.game4.submissions[groupId] || scoreEarned > gameState.game4.submissions[groupId].scoreEarned) {
+      gameState.game4.submissions[groupId] = submissionData;
+    }
+
+    if (typeof callback === 'function') {
+      callback({
+        success: true,
+        correctCount: correctCount,
+        totalCount: targetLen,
+        scoreEarned: scoreEarned
+      });
+    }
+
+    // 廣播提交更新至教師端與解密組
+    io.emit('game4_submission_received', {
+      groupId: groupId,
+      groupName: groupName,
+      studentId: studentId,
+      correctCount: correctCount,
+      totalCount: targetLen,
+      scoreEarned: scoreEarned,
+      submissions: gameState.game4.submissions
+    });
+
+    // 檢查是否所有解密組都已提交答案 (解密組數量 = 總組數 - 1)
+    const allGroupKeys = Object.keys(gameState.groups);
+    const decryptGroupCount = Math.max(1, allGroupKeys.length - 1);
+    const submittedCount = Object.keys(gameState.game4.submissions).length;
+
+    if (submittedCount >= decryptGroupCount) {
+      finishGame4Round();
+    }
+  });
+
+  // 教師手動提早結算本回合
+  socket.on('game4_teacher_settle_round', () => {
+    finishGame4Round();
+  });
+
+  // 教師進入下一輪出題
+  socket.on('game4_teacher_next_round', () => {
+    advanceGame4NextRound();
+  });
+
+  // 教師示範模擬：一鍵模擬出題組輸入與解密組答題
+  socket.on('game4_simulate_round', () => {
+    if (!gameState.game4) return;
+
+    if (gameState.game4.phase === 'submitting_words') {
+      const turnGroup = gameState.game4.turnGroup;
+      const members = gameState.groups[turnGroup]?.members || ['s01', 's02', 's03', 's04'];
+      const sampleLetters = ['B', 'I', 'T', 'E'];
+      members.forEach((mId, idx) => {
+        const letChar = sampleLetters[idx % sampleLetters.length];
+        const shifted = caesarShift2Char(letChar);
+        gameState.game4.groupInputs[mId] = {
+          studentId: mId,
+          letter: letChar,
+          shifted: shifted,
+          morse: charToMorse(shifted)
+        };
+      });
+
+      // 自動送出確認
+      const original = sampleLetters.slice(0, Math.min(members.length, 5)).join('');
+      const shiftedStr = caesarShift2Str(original);
+      gameState.game4.originalWord = original;
+      gameState.game4.shiftedWord = shiftedStr;
+      gameState.game4.morseCode = textToMorse(shiftedStr);
+      gameState.game4.phase = 'decrypting';
+      gameState.game4.submissions = {};
+
+      io.emit('game4_word_broadcast', {
+        round: gameState.game4.round,
+        turnGroup: turnGroup,
+        turnGroupName: gameState.groups[turnGroup]?.name || turnGroup,
+        letterCount: original.length,
+        morseCode: gameState.game4.morseCode,
+        phase: 'decrypting'
+      });
+      io.emit('state_sync', getSyncPayload());
+    } else if (gameState.game4.phase === 'decrypting') {
+      // 模擬解密組作答
+      const allGroupKeys = Object.keys(gameState.groups);
+      allGroupKeys.forEach(gId => {
+        if (gId === gameState.game4.turnGroup) return;
+        const target = gameState.game4.originalWord;
+        const isFull = Math.random() > 0.3;
+        const simulatedAns = isFull ? target : (target.slice(0, -1) + 'X');
+        let corr = 0;
+        for (let i = 0; i < target.length; i++) {
+          if (i < simulatedAns.length && simulatedAns[i] === target[i]) corr++;
+        }
+        gameState.game4.submissions[gId] = {
+          groupId: gId,
+          groupName: gameState.groups[gId]?.name || gId,
+          studentId: (gameState.groups[gId]?.members || [])[0] || 's99',
+          answer: simulatedAns,
+          targetLen: target.length,
+          correctCount: corr,
+          scoreEarned: corr,
+          timeTaken: parseFloat((5 + Math.random() * 8).toFixed(1)),
+          submittedAt: Date.now()
+        };
+      });
+
+      finishGame4Round();
+    } else if (gameState.game4.phase === 'round_result') {
+      advanceGame4NextRound();
+    }
   });
 
   // 學生提交第一關分數 (字母輸入速度挑戰)
@@ -1007,8 +1491,10 @@ io.on('connection', (socket) => {
       io.to('teachers').emit('student_status_changed', {
         studentId: socket.studentId,
         online: false,
-        students: gameState.students
+        students: gameState.students,
+        onlineStudents: getOnlineStudentIds()
       });
+      io.emit('state_sync', getSyncPayload());
     }
   });
 });

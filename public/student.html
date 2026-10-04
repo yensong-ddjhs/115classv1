@@ -53,11 +53,15 @@
       
       <div class="space-y-2">
         <h2 class="text-2xl font-bold text-white">歡迎進入闖關等待室！</h2>
+        <div id="studentLobbyCountBadge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+          <span id="studentLobbyOnlineText">大廳連線人數：0 人</span>
+        </div>
         <p class="text-sm text-cyan-300 font-semibold" id="waitingGroupText">
-          正在確認您的組別...
+          等待老師開始遊戲與分組中...
         </p>
-        <p class="text-xs text-slate-400">
-          老師正在前方主控台進行分組與準備。請等待老師點擊「開始遊戲」，畫面將自動切換至第一關！
+        <p id="studentLobbyInstruction" class="text-xs text-slate-400">
+          老師正在前方主控台進行分組與準備。請等待老師點擊「開始遊戲」，畫面將自動切換！
         </p>
       </div>
 

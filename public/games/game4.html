@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>遊戲四：凱撒摩斯密碼小隊對決 (Caesar-Morse Code Duel)</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+  <style>
+    .glow-cyan {
+      box-shadow: 0 0 25px rgba(6, 182, 212, 0.25);
+    }
+    .glow-amber {
+      box-shadow: 0 0 25px rgba(245, 158, 11, 0.25);
+    }
+    .glow-purple {
+      box-shadow: 0 0 25px rgba(168, 85, 247, 0.25);
+    }
+    .morse-code-font {
+      font-family: 'Courier New', Courier, monospace;
+      letter-spacing: 0.25em;
+    }
+    .animate-pulse-slow {
+      animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between select-none font-sans">
+
+  <!-- 頂部 HUD 資訊列 -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-40">
+    <div class="flex items-center space-x-3">
+      <!-- 學生頭像 -->
+      <div id="studentAvatar" class="w-10 h-10 rounded-xl bg-cyan-600 flex items-center justify-center font-mono font-bold text-base shadow-lg shadow-cyan-600/30 border border-cyan-400/40">
+        s--
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="studentIdDisplay" class="font-mono font-bold text-white text-base">s--</span>
+          <span id="groupBadge" class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-slate-800 text-slate-300 border border-slate-700">
+            載入組別中...
+          </span>
+          <span id="roleBadge" class="text-xs px-2.5 py-0.5 rounded-full font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+            連線中
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400">凱撒摩斯密碼小隊對決 • 課堂即時連線</p>
+      </div>
+    </div>
+
+    <!-- 回合進度與小隊總分 -->
+    <div class="flex items-center gap-3">
+      <div class="bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
+        <span class="text-xs text-slate-400">當前回合：</span>
+        <span id="roundDisplay" class="font-mono font-bold text-amber-400 text-sm">Round 1 / 5</span>
+      </div>
+      <div class="bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-800 flex items-center gap-2">
+        <span class="text-xs text-slate-400">小組累計得分：</span>
+        <span id="myGroupScoreDisplay" class="font-mono font-extrabold text-cyan-300 text-base">0 分</span>
+      </div>
+      <!-- 音效切換 -->
+      <button onclick="toggleAudio()" id="audioBtn" class="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-sm" title="音效切換">
+        🔊
+      </button>
+    </div>
+  </header>
+
+  <!-- 主遊戲視窗 -->
+  <main class="flex-1 max-w-4xl mx-auto w-full p-4 sm:p-6 flex flex-col justify-center">
+
+    <!-- 視圖 1: 出題組操作面板 (Encoding Panel) -->
+    <div id="encoderPanel" class="hidden w-full bg-slate-900/90 border-2 border-amber-500/40 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur glow-amber">
+      <!-- 標題提示 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-2xl">
+            🎯
+          </div>
+          <div>
+            <span class="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">ROUND IN PROGRESS</span>
+            <h2 class="text-xl sm:text-2xl font-black text-white">本回合由【貴組】擔任出題組！</h2>
+            <p class="text-xs text-slate-400">每位組員各輸入 1 個英文字母，系統將自動進行「凱撒加密 (+2)」並轉換為「摩斯密碼」廣播給其他小組！</p>
+          </div>
+        </div>
+        <div class="px-3 py-1 rounded-xl bg-amber-950/60 border border-amber-500/30 text-amber-300 text-xs font-mono font-bold">
+          Caesar Shift: +2
+        </div>
+      </div>
+
+      <!-- 組員字母輸入卡片 -->
+      <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-5">
+        <div class="text-center space-y-1">
+          <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+            👉 請在下方輸入您的專屬英文字母（1 個字母，A - Z）
+          </label>
+          <p class="text-[11px] text-slate-400">大小寫皆可，系統自動轉大寫並即時同步給隊友</p>
+        </div>
+
+        <div class="flex items-center justify-center gap-3">
+          <input
+            type="text"
+            id="letterInput"
+            maxlength="1"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="A"
+            class="w-20 h-20 text-center font-mono text-4xl font-black rounded-2xl bg-slate-900 border-2 border-amber-500/80 text-amber-300 focus:outline-none focus:border-amber-400 uppercase shadow-inner transition-all transform focus:scale-105"
+          >
+          <button onclick="randomLetterPrompt()" class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-all flex items-center gap-1.5" title="隨機推薦字母">
+            <span>🎲 隨機字母</span>
+          </button>
+        </div>
+
+        <!-- 即時加密轉換展示 -->
+        <div class="grid grid-cols-3 gap-3 pt-2 text-center text-xs">
+          <div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div class="text-slate-400 text-[10px] mb-1">原始字母</div>
+            <div id="previewOriginalLetter" class="text-2xl font-mono font-black text-white">-</div>
+          </div>
+          <div class="p-3 rounded-xl bg-amber-950/40 border border-amber-500/30">
+            <div class="text-amber-300/80 text-[10px] mb-1">凱撒加密 (+2)</div>
+            <div id="previewShiftedLetter" class="text-2xl font-mono font-black text-amber-400">-</div>
+          </div>
+          <div class="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30">
+            <div class="text-cyan-300/80 text-[10px] mb-1">摩斯密碼</div>
+            <div id="previewMorseLetter" class="text-2xl font-mono font-black text-cyan-300">-</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 出題組全隊填寫進度 -->
+      <div class="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div class="flex items-center justify-between text-xs font-semibold text-slate-300">
+          <span class="flex items-center gap-2">
+            <span>👥 出題組全體隊友輸入狀態：</span>
+            <span id="submittedMembersCount" class="font-mono text-amber-400">0 人已填寫</span>
+          </span>
+          <span class="text-[11px] text-slate-500">全員確認後送出題目</span>
+        </div>
+
+        <!-- 隊友輸入字母卡列表 -->
+        <div id="teammateInputsList" class="flex flex-wrap gap-2.5">
+          <!-- 動態插入 -->
+        </div>
+
+        <!-- 組合合成單字預覽 -->
+        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div>
+            <span class="text-slate-400">組合原始單字：</span>
+            <span id="composedWordDisplay" class="font-mono text-base font-black text-white ml-1">---</span>
+          </div>
+          <div>
+            <span class="text-amber-400/80">加密推播字串：</span>
+            <span id="composedShiftedDisplay" class="font-mono text-base font-black text-amber-400 ml-1">---</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 送出出題按鈕 -->
+      <div class="pt-2">
+        <button
+          id="confirmWordBtn"
+          onclick="confirmAndBroadcastWord()"
+          class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black tracking-wider text-base shadow-xl shadow-amber-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <span>🚀 完成出題並廣播摩斯密碼至全班！</span>
+        </button>
+        <p class="text-center text-[11px] text-slate-500 mt-2">
+          若有組員缺席或尚未輸入，系統將使用已輸入字母（或自動補足）合成單字，絕不卡關！
+        </p>
+      </div>
+    </div>
+
+    <!-- 視圖 2: 解密組操作面板 (Decryption Panel) -->
+    <div id="decoderPanel" class="hidden w-full bg-slate-900/90 border-2 border-cyan-500/40 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur glow-cyan">
+      <!-- 標題提示 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-2xl">
+            📡
+          </div>
+          <div>
+            <span class="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">DECRYPT TASK</span>
+            <h2 class="text-xl sm:text-2xl font-black text-white">
+              解密組任務：破解 <span id="currentTurnGroupName" class="text-cyan-400 font-extrabold">第 1 組</span> 的密碼！
+            </h2>
+            <p class="text-xs text-slate-400">依據收到的摩斯密碼，查閱對照表解碼出加密字母，再將凱撒位移往左推回 2 位（-2），得出原始英文字母！</p>
+          </div>
+        </div>
+
+        <!-- 播放摩斯嗶嗶聲按鈕 -->
+        <button onclick="playCurrentMorseAudio()" class="px-4 py-2 rounded-xl bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-cyan-950/50 cursor-pointer">
+          <span class="text-base">🔊</span>
+          <span>播放摩斯電報音效 (Beep)</span>
+        </button>
+      </div>
+
+      <!-- 摩斯密碼廣播展示大看板 -->
+      <div class="p-6 rounded-2xl bg-slate-950 border-2 border-cyan-500/50 text-center space-y-3">
+        <div class="text-[11px] font-bold text-cyan-400 uppercase tracking-widest flex items-center justify-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+          <span>收到的摩斯密碼訊號（字母間以空格隔開）</span>
+        </div>
+
+        <div id="morseCodeDisplay" class="morse-code-font text-3xl sm:text-4xl md:text-5xl font-black text-cyan-300 tracking-widest break-all py-2 selection:bg-cyan-500 selection:text-black">
+          載入題目中...
+        </div>
+
+        <div class="text-xs text-slate-400 flex items-center justify-center gap-2">
+          <span>題目長度：</span>
+          <span id="targetLetterCountDisplay" class="font-mono text-cyan-400 font-bold text-sm">-- 個字母</span>
+        </div>
+      </div>
+
+      <!-- 解密作答輸入區 -->
+      <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <div class="text-center space-y-1">
+          <label class="block text-xs font-bold text-white uppercase tracking-wider">
+            ⌨️ 請輸入還原後的【原始英文字母答案】：
+          </label>
+          <p class="text-[11px] text-amber-300 font-medium">
+            💡 解碼兩步驟：① 摩斯密碼 ➔ 加密字母　② 加密字母向左退 2 位（-2） ➔ 原始字母！
+          </p>
+        </div>
+
+        <div class="max-w-md mx-auto">
+          <input
+            type="text"
+            id="decryptionAnswerInput"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="請輸入解碼後的原始單字 (例如: HELLO)"
+            class="w-full h-16 text-center font-mono text-2xl sm:text-3xl font-black rounded-2xl bg-slate-900 border-2 border-cyan-500 text-cyan-300 focus:outline-none focus:border-cyan-400 uppercase tracking-widest shadow-inner transition-all"
+          >
+        </div>
+
+        <!-- 送出答案按鈕 -->
+        <button
+          id="submitAnswerBtn"
+          onclick="submitDecryptionAnswer()"
+          class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-base shadow-xl shadow-cyan-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <span>✅ 送出答案並為小組爭取積分！</span>
+        </button>
+
+        <!-- 個人/小組作答狀態回饋 -->
+        <div id="decryptionFeedback" class="hidden p-4 rounded-xl text-center space-y-1 border">
+          <!-- 動態更新結果 -->
+        </div>
+      </div>
+
+      <!-- 快速對照與解密輔助小工具 (可折疊) -->
+      <details class="group bg-slate-950/50 border border-slate-800 rounded-2xl p-4 text-xs cursor-pointer">
+        <summary class="font-bold text-slate-300 flex items-center justify-between list-none">
+          <span class="flex items-center gap-2 text-cyan-400">
+            <span>📖</span>
+            <span>點擊展開：摩斯密碼表 (A-Z) & 凱撒位移 (-2) 快速對照表</span>
+          </span>
+          <span class="group-open:rotate-180 transition-transform text-slate-500">▼</span>
+        </summary>
+
+        <div class="mt-4 pt-3 border-t border-slate-800/80 space-y-3">
+          <div class="text-[11px] text-slate-400">
+            凱撒逆向推回 2 位：<span class="font-mono text-amber-300 font-bold">C ➔ A，D ➔ B，...，A ➔ Y，B ➔ Z</span>
+          </div>
+
+          <!-- 26 個字母摩斯密碼快速查表 -->
+          <div id="morseReferenceGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-1.5 font-mono text-[11px]">
+            <!-- 動態生成 26 個字母對照 -->
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- 視圖 3: 等待出題組輸入中 (Waiting for Turn Group) -->
+    <div id="waitingForWordPanel" class="hidden w-full max-w-lg mx-auto bg-slate-900/90 border border-slate-800 rounded-3xl p-8 text-center space-y-6 shadow-2xl backdrop-blur">
+      <div class="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 mx-auto flex items-center justify-center text-3xl animate-bounce">
+        ⏳
+      </div>
+      <div class="space-y-2">
+        <h3 class="text-2xl font-bold text-white">等待出題組出題中...</h3>
+        <p id="waitingTurnGroupText" class="text-sm text-cyan-300 font-semibold">
+          第 1 組 正在輪流鍵入字母並加密
+        </p>
+        <p class="text-xs text-slate-400 leading-relaxed">
+          出題組組員正在鍵盤上輸入英文字母。完成加密與摩斯密碼轉換後，題目將立刻推播至您的螢幕！
+        </p>
+      </div>
+
+      <div class="p-4 rounded-xl bg-slate-950/70 border border-slate-800 text-left space-y-2 text-xs">
+        <div class="text-slate-400 font-semibold">💡 備戰提醒：</div>
+        <p class="text-slate-300">
+          摩斯密碼包含「點（.）」與「劃（-）」。題目推播後，請先將摩斯密碼還原，再向左推回 2 位即可得出原始答案！
+        </p>
+      </div>
+
+      <div class="flex items-center justify-center gap-2 text-xs text-cyan-400">
+        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+        <span>靜候摩斯密碼廣播中...</span>
+      </div>
+    </div>
+
+    <!-- 視圖 4: 回合結算卡片 (Round Settled) -->
+    <div id="roundResultModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 hidden">
+      <div class="bg-slate-900 border-2 border-amber-500/60 rounded-3xl max-w-xl w-full p-6 sm:p-8 space-y-6 shadow-2xl text-center">
+        <div class="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 mx-auto flex items-center justify-center text-3xl">
+          📊
+        </div>
+
+        <div class="space-y-1">
+          <span id="rrModalRoundTag" class="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+            ROUND 1 FINISHED
+          </span>
+          <h2 class="text-2xl font-black text-white mt-1">本回合解密結算</h2>
+        </div>
+
+        <!-- 題目與解答對照卡 -->
+        <div class="p-4 rounded-2xl bg-slate-950 border border-slate-800 grid grid-cols-3 gap-2 text-center text-xs font-mono">
+          <div class="p-2 rounded-xl bg-slate-900 border border-slate-800">
+            <div class="text-slate-400 text-[10px]">原始解答單字</div>
+            <div id="rrOriginalWord" class="text-xl font-black text-white mt-1">--</div>
+          </div>
+          <div class="p-2 rounded-xl bg-amber-950/40 border border-amber-500/30">
+            <div class="text-amber-300 text-[10px]">凱撒加密 (+2)</div>
+            <div id="rrShiftedWord" class="text-xl font-black text-amber-400 mt-1">--</div>
+          </div>
+          <div class="p-2 rounded-xl bg-cyan-950/40 border border-cyan-500/30">
+            <div class="text-cyan-300 text-[10px]">廣播摩斯碼</div>
+            <div id="rrMorseCode" class="text-xs font-black text-cyan-300 mt-2 truncate">--</div>
+          </div>
+        </div>
+
+        <!-- 各解密組本回合作答清單 -->
+        <div class="text-left bg-slate-950/70 p-4 rounded-2xl border border-slate-800 space-y-2">
+          <div class="text-xs font-bold text-slate-400 uppercase">各解密組作答成果與得分</div>
+          <div id="rrSubmissionsList" class="space-y-1.5 text-xs font-mono text-slate-300 max-h-40 overflow-y-auto">
+            <!-- 動態插入 -->
+          </div>
+        </div>
+
+        <div class="text-xs text-slate-400 animate-pulse">
+          等待老師點擊切換至下一輪出題組...
+        </div>
+      </div>
+    </div>
+
+    <!-- 視圖 5: 總冠軍全場結算 (Grand Championship) -->
+    <div id="grandChampionshipModal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-lg flex items-center justify-center p-4 hidden">
+      <div class="bg-slate-900 border-2 border-yellow-500/80 rounded-3xl max-w-xl w-full p-6 sm:p-8 space-y-6 shadow-2xl text-center">
+        <div class="w-20 h-20 rounded-3xl bg-yellow-500/20 border-2 border-yellow-500/50 text-yellow-400 mx-auto flex items-center justify-center text-4xl shadow-xl shadow-yellow-500/30 animate-bounce">
+          🏆
+        </div>
+
+        <div class="space-y-1">
+          <span class="text-xs font-mono font-bold uppercase tracking-widest px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/40">
+            ALL ROUNDS COMPLETED
+          </span>
+          <h2 class="text-3xl font-black text-white">凱撒摩斯密碼小隊對決 • 總冠軍公布</h2>
+        </div>
+
+        <!-- 冠軍頒獎卡 -->
+        <div class="p-6 rounded-2xl bg-gradient-to-br from-yellow-500/20 via-amber-950/40 to-slate-950 border-2 border-yellow-500/70 shadow-xl space-y-2">
+          <div class="text-xs font-black px-2.5 py-0.5 rounded bg-yellow-400 text-slate-950 font-mono inline-block">
+            👑 榮譽總冠軍
+          </div>
+          <div id="champWinnerName" class="text-3xl font-black text-white mt-1">第 1 組</div>
+          <div class="text-sm text-yellow-300 font-mono font-bold" id="champWinnerScore">累積總分：-- 分</div>
+        </div>
+
+        <!-- 各組排行 -->
+        <div class="text-left bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-2">
+          <div class="text-xs font-bold text-slate-400 uppercase">全隊最終總積分排行榜</div>
+          <div id="champRankingsList" class="space-y-1.5 text-xs font-mono text-slate-300">
+            <!-- 動態插入 -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 頁尾 -->
+  <footer class="py-3 text-center text-xs text-slate-600 border-t border-slate-900">
+    二進位 × 密碼學 • 凱撒密碼位移 +2 結合國際摩斯電碼雙重解碼
+  </footer>
+
+  <script>
+    // ==========================================
+    // 遊戲四客戶端通訊與核心邏輯
+    // ==========================================
+    const socket = io();
+
+    // 依 PROMPT_RULES.md 優先讀取座號
+    const urlParams = new URLSearchParams(window.location.search);
+    let myStudentId = localStorage.getItem('studentId') || urlParams.get('id') || 's01';
+    myStudentId = myStudentId.trim().toLowerCase();
+
+    // 摩斯密碼對照表
+    const MORSE_MAP = {
+      'A': '.-',    'B': '-...',  'C': '-.-.',  'D': '-..',   'E': '.',
+      'F': '..-.',  'G': '--.',   'H': '....',  'I': '..',    'J': '.---',
+      'K': '-.-',   'L': '.-..',  'M': '--',    'N': '-.',    'O': '---',
+      'P': '.--.',  'Q': '--.-',  'R': '.-.',   'S': '...',   'T': '-',
+      'U': '..-',   'V': '...-',  'W': '.--',   'X': '-..-',  'Y': '-.--',
+      'Z': '--..'
+    };
+
+    // 本地狀態快取
+    let myGroupId = null;
+    let myGroupData = null;
+    let game4State = null;
+    let currentMorseCode = '';
+    let isTurnGroup = false;
+    let hasSubmittedAnswer = false;
+
+    // Web Audio API 播放真實摩斯電碼逼逼聲
+    let audioCtx = null;
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      return audioCtx;
+    }
+
+    // 播放一個點 (dot) 或 劃 (dash)
+    function playTone(freq, durationMs) {
+      try {
+        const ctx = getAudioContext();
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durationMs / 1000);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start();
+        osc.stop(ctx.currentTime + durationMs / 1000);
+      } catch (e) {
+        console.error('Audio error:', e);
+      }
+    }
+
+    // 依序播放摩斯密碼字串
+    async function playMorseString(morseStr) {
+      const dotTime = 90;   // 點：90ms
+      const dashTime = 270; // 劃：270ms
+      const intraCharPause = 90;
+      const charPause = 250;
+
+      for (let i = 0; i < morseStr.length; i++) {
+        const symbol = morseStr[i];
+        if (symbol === '.') {
+          playTone(750, dotTime);
+          await new Promise(r => setTimeout(r, dotTime + intraCharPause));
+        } else if (symbol === '-') {
+          playTone(750, dashTime);
+          await new Promise(r => setTimeout(r, dashTime + intraCharPause));
+        } else if (symbol === ' ') {
+          await new Promise(r => setTimeout(r, charPause));
+        }
+      }
+    }
+
+    function playCurrentMorseAudio() {
+      if (!currentMorseCode) return;
+      playMorseString(currentMorseCode);
+    }
+
+    // 初始化摩斯密碼對照表小幫手
+    function renderMorseReferenceGrid() {
+      const grid = document.getElementById('morseReferenceGrid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      Object.keys(MORSE_MAP).forEach(letter => {
+        const card = document.createElement('div');
+        card.className = 'p-1.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between text-slate-300';
+        card.innerHTML = `
+          <span class="font-black text-cyan-400">${letter}</span>
+          <span class="text-amber-300 font-mono tracking-wider">${MORSE_MAP[letter]}</span>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    // 凱撒位移 +2 計算
+    function caesarShift2(ch) {
+      const code = ch.toUpperCase().charCodeAt(0);
+      if (code >= 65 && code <= 90) {
+        return String.fromCharCode(((code - 65 + 2) % 26) + 65);
+      }
+      return ch.toUpperCase();
+    }
+
+    // 隨機推薦字母
+    function randomLetterPrompt() {
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const r = letters[Math.floor(Math.random() * letters.length)];
+      const input = document.getElementById('letterInput');
+      input.value = r;
+      handleLetterInputChange();
+    }
+
+    // 處理出題組字母輸入變更
+    function handleLetterInputChange() {
+      const input = document.getElementById('letterInput');
+      const val = (input.value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      input.value = val;
+
+      if (!val) {
+        document.getElementById('previewOriginalLetter').innerText = '-';
+        document.getElementById('previewShiftedLetter').innerText = '-';
+        document.getElementById('previewMorseLetter').innerText = '-';
+        return;
+      }
+
+      const originalChar = val[0];
+      const shiftedChar = caesarShift2(originalChar);
+      const morseChar = MORSE_MAP[shiftedChar] || '';
+
+      document.getElementById('previewOriginalLetter').innerText = originalChar;
+      document.getElementById('previewShiftedLetter').innerText = shiftedChar;
+      document.getElementById('previewMorseLetter').innerText = morseChar;
+
+      // 即時發送給伺服器
+      socket.emit('game4_submit_letter', {
+        studentId: myStudentId,
+        letter: originalChar
+      });
+    }
+
+    document.getElementById('letterInput').addEventListener('input', handleLetterInputChange);
+
+    // 出題組點擊送出出題確認
+    function confirmAndBroadcastWord() {
+      if (window.sound && typeof sound.playKey === 'function') sound.playKey();
+      socket.emit('game4_confirm_word');
+    }
+
+    // 解密組提交答案
+    let questionReceiveTime = Date.now();
+    function submitDecryptionAnswer() {
+      const ansInput = document.getElementById('decryptionAnswerInput');
+      const answer = (ansInput.value || '').trim().toUpperCase();
+      if (!answer) {
+        alert('請先輸入您解密出的英文單字！');
+        return;
+      }
+
+      const timeTaken = ((Date.now() - questionReceiveTime) / 1000).toFixed(1);
+
+      socket.emit('game4_submit_decryption', {
+        studentId: myStudentId,
+        answer: answer,
+        timeTaken: timeTaken
+      }, (res) => {
+        hasSubmittedAnswer = true;
+        const feedback = document.getElementById('decryptionFeedback');
+        const submitBtn = document.getElementById('submitAnswerBtn');
+        if (!feedback) return;
+
+        feedback.classList.remove('hidden');
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+        if (res && res.success) {
+          if (window.sound && typeof sound.playScoreGained === 'function') sound.playScoreGained();
+          feedback.className = 'p-4 rounded-xl text-center space-y-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-200';
+          feedback.innerHTML = `
+            <div class="text-base font-black">🎉 答案已成功送出！</div>
+            <div class="text-xs">
+              答對字母：<span class="font-mono font-bold text-white">${res.correctCount} / ${res.totalCount}</span> 個 ｜ 獲得 <span class="font-mono font-bold text-amber-300">+${res.scoreEarned}</span> 分！
+            </div>
+            <div class="text-[11px] text-slate-300 mt-1">等待其他解密組完成答題即可進入本回合結算...</div>
+          `;
+        } else {
+          feedback.className = 'p-4 rounded-xl text-center space-y-1 bg-rose-500/20 border border-rose-500/40 text-rose-200';
+          feedback.innerHTML = `<div class="text-xs">${res ? res.message : '提交失敗'}</div>`;
+        }
+      });
+    }
+
+    // 支援 Enter 鍵送出
+    document.getElementById('decryptionAnswerInput').addEventListener('keyup', (e) => {
+      if (e.key === 'Enter' && !hasSubmittedAnswer) submitDecryptionAnswer();
+    });
+
+    // 介面視圖切換管理
+    function updateViewMode() {
+      if (!game4State) return;
+
+      const encoderPanel = document.getElementById('encoderPanel');
+      const decoderPanel = document.getElementById('decoderPanel');
+      const waitingForWordPanel = document.getElementById('waitingForWordPanel');
+      const roundResultModal = document.getElementById('roundResultModal');
+
+      // 更新頂部 HUD
+      document.getElementById('roundDisplay').innerText = `Round ${game4State.round} / ${game4State.totalRounds}`;
+      const myScore = (myGroupId && game4State.groupScores && game4State.groupScores[myGroupId]) || 0;
+      document.getElementById('myGroupScoreDisplay').innerText = `${myScore} 分`;
+
+      const roleBadge = document.getElementById('roleBadge');
+      if (isTurnGroup) {
+        roleBadge.innerText = '🎯 本輪出題組';
+        roleBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+      } else {
+        roleBadge.innerText = '📡 本輪解密組';
+        roleBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
+      }
+
+      // 階段 1: 出題中
+      if (game4State.phase === 'submitting_words') {
+        roundResultModal.classList.add('hidden');
+        if (isTurnGroup) {
+          encoderPanel.classList.remove('hidden');
+          decoderPanel.classList.add('hidden');
+          waitingForWordPanel.classList.add('hidden');
+          renderTeammatesInputs();
+        } else {
+          encoderPanel.classList.add('hidden');
+          decoderPanel.classList.add('hidden');
+          waitingForWordPanel.classList.remove('hidden');
+          const turnGroupName = (game4State.groups && game4State.groups[game4State.turnGroup]?.name) || game4State.turnGroup;
+          document.getElementById('waitingTurnGroupText').innerText = `${turnGroupName} 正在輪流鍵入字母並加密中...`;
+        }
+      } 
+      // 階段 2: 解密答題中
+      else if (game4State.phase === 'decrypting') {
+        roundResultModal.classList.add('hidden');
+        if (isTurnGroup) {
+          // 出題組等待其他組答題
+          encoderPanel.classList.remove('hidden');
+          decoderPanel.classList.add('hidden');
+          waitingForWordPanel.classList.add('hidden');
+          // 鎖定出題按鈕
+          const confirmBtn = document.getElementById('confirmWordBtn');
+          confirmBtn.disabled = true;
+          confirmBtn.innerHTML = '<span>📡 題目已推播！其他小組正在解密中...</span>';
+          confirmBtn.className = confirmBtn.className.replace(/from-\S+ to-\S+/g, '').trim() + ' bg-slate-800 text-slate-400 cursor-not-allowed';
+        } else {
+          encoderPanel.classList.add('hidden');
+          decoderPanel.classList.remove('hidden');
+          waitingForWordPanel.classList.add('hidden');
+          currentMorseCode = game4State.morseCode || '';
+          document.getElementById('morseCodeDisplay').innerText = currentMorseCode || '---';
+          document.getElementById('targetLetterCountDisplay').innerText = `${game4State.originalWord ? game4State.originalWord.length : '--'} 個字母`;
+          const turnGroupName = (game4State.groups && game4State.groups[game4State.turnGroup]?.name) || game4State.turnGroup;
+          document.getElementById('currentTurnGroupName').innerText = turnGroupName;
+        }
+      }
+      // 階段 3: 回合結算
+      else if (game4State.phase === 'round_result') {
+        showRoundSettledModal();
+      }
+    }
+
+    // 渲染出題組隊友輸入狀態清單
+    function renderTeammatesInputs() {
+      const container = document.getElementById('teammateInputsList');
+      if (!container || !game4State) return;
+      container.innerHTML = '';
+
+      const turnGroupMembers = (myGroupData && myGroupData.members) || [];
+      const inputs = game4State.groupInputs || {};
+      let filledCount = 0;
+      let composedWord = '';
+      let shiftedWord = '';
+
+      turnGroupMembers.forEach(mId => {
+        const hasInput = inputs[mId] && inputs[mId].letter;
+        if (hasInput) {
+          filledCount++;
+          composedWord += inputs[mId].letter;
+          shiftedWord += inputs[mId].shifted;
+        }
+        const isMe = mId === myStudentId;
+
+        const card = document.createElement('div');
+        card.className = `px-3 py-2 rounded-xl border flex items-center gap-2 ${hasInput ? 'bg-amber-950/40 border-amber-500/50 text-amber-200' : 'bg-slate-900 border-slate-800 text-slate-500'}`;
+        card.innerHTML = `
+          <span class="w-2 h-2 rounded-full ${hasInput ? 'bg-amber-400' : 'bg-slate-600'}"></span>
+          <span class="font-mono text-xs font-bold">${mId}${isMe ? ' (我)' : ''}：</span>
+          <span class="font-mono text-base font-black ${hasInput ? 'text-white' : 'text-slate-600'}">${hasInput ? inputs[mId].letter : '?'}</span>
+        `;
+        container.appendChild(card);
+      });
+
+      document.getElementById('submittedMembersCount').innerText = `${filledCount} / ${turnGroupMembers.length} 人已填寫`;
+      document.getElementById('composedWordDisplay').innerText = composedWord || '---';
+      document.getElementById('composedShiftedDisplay').innerText = shiftedWord || '---';
+    }
+
+    // 展示回合結算彈窗
+    function showRoundSettledModal() {
+      const modal = document.getElementById('roundResultModal');
+      if (!modal || !game4State) return;
+
+      document.getElementById('rrModalRoundTag').innerText = `ROUND ${game4State.round} FINISHED`;
+      document.getElementById('rrOriginalWord').innerText = game4State.originalWord || '--';
+      document.getElementById('rrShiftedWord').innerText = game4State.shiftedWord || '--';
+      document.getElementById('rrMorseCode').innerText = game4State.morseCode || '--';
+
+      const subList = document.getElementById('rrSubmissionsList');
+      subList.innerHTML = '';
+      const subs = game4State.submissions || {};
+      const subKeys = Object.keys(subs);
+
+      if (subKeys.length === 0) {
+        subList.innerHTML = '<div class="text-slate-500 italic">本回合無作答紀錄</div>';
+      } else {
+        subKeys.forEach(gId => {
+          const sub = subs[gId];
+          const div = document.createElement('div');
+          div.className = 'p-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between';
+          div.innerHTML = `
+            <span class="font-bold text-white">${sub.groupName}</span>
+            <span class="text-slate-400">作答: <span class="font-mono text-cyan-300 font-bold">${sub.answer}</span></span>
+            <span class="text-amber-400 font-bold">+${sub.scoreEarned} 分</span>
+          `;
+          subList.appendChild(div);
+        });
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    // ── Socket 事件監聽 ──────────────────────────────────────
+
+    // 初始化與就緒
+    socket.emit('game4_init', { studentId: myStudentId });
+
+    socket.on('game4_ready', (data) => {
+      game4State = data.game4;
+      myGroupId = data.groupId;
+      myGroupData = data.groups && data.groups[myGroupId];
+      isTurnGroup = data.isTurnGroup;
+
+      document.getElementById('studentIdDisplay').innerText = myStudentId.toUpperCase();
+      document.getElementById('studentAvatar').innerText = myStudentId.toUpperCase();
+      if (myGroupData) {
+        document.getElementById('groupBadge').innerText = myGroupData.name;
+      }
+
+      updateViewMode();
+    });
+
+    // 隊友字母輸入更新
+    socket.on('game4_inputs_updated', (data) => {
+      if (game4State) {
+        game4State.groupInputs = data.inputs;
+        if (isTurnGroup) {
+          renderTeammatesInputs();
+        }
+      }
+    });
+
+    // 出題題目已廣播
+    socket.on('game4_word_broadcast', (data) => {
+      if (!game4State) return;
+      game4State.phase = 'decrypting';
+      game4State.morseCode = data.morseCode;
+      game4State.round = data.round;
+      questionReceiveTime = Date.now();
+      hasSubmittedAnswer = false;
+
+      // 重置作答輸入框
+      const ansInput = document.getElementById('decryptionAnswerInput');
+      if (ansInput) ansInput.value = '';
+      const feedback = document.getElementById('decryptionFeedback');
+      if (feedback) feedback.classList.add('hidden');
+      const submitBtn = document.getElementById('submitAnswerBtn');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+
+      updateViewMode();
+      if (window.sound && typeof sound.playVictory === 'function') sound.playVictory();
+    });
+
+    // 回合結算通知
+    socket.on('game4_round_settled', (data) => {
+      if (game4State) {
+        game4State.phase = 'round_result';
+        game4State.originalWord = data.originalWord;
+        game4State.shiftedWord = data.shiftedWord;
+        game4State.morseCode = data.morseCode;
+        game4State.submissions = data.submissions;
+        game4State.groupScores = data.totalScores;
+      }
+      showRoundSettledModal();
+      if (window.sound && typeof sound.playVictory === 'function') sound.playVictory();
+    });
+
+    // 新回合開始
+    socket.on('game4_new_round', (data) => {
+      if (!game4State) return;
+      game4State.round = data.round;
+      game4State.totalRounds = data.totalRounds;
+      game4State.turnGroup = data.turnGroup;
+      game4State.phase = 'submitting_words';
+      game4State.groupInputs = {};
+      game4State.originalWord = '';
+      game4State.shiftedWord = '';
+      game4State.morseCode = '';
+      game4State.submissions = {};
+
+      isTurnGroup = myGroupId === data.turnGroup;
+      hasSubmittedAnswer = false;
+
+      // 重置出題輸入框
+      const letInput = document.getElementById('letterInput');
+      if (letInput) letInput.value = '';
+      document.getElementById('previewOriginalLetter').innerText = '-';
+      document.getElementById('previewShiftedLetter').innerText = '-';
+      document.getElementById('previewMorseLetter').innerText = '-';
+
+      const confirmBtn = document.getElementById('confirmWordBtn');
+      if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.className = 'w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black tracking-wider text-base shadow-xl shadow-amber-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer';
+        confirmBtn.innerHTML = '<span>🚀 完成出題並廣播摩斯密碼至全班！</span>';
+      }
+
+      updateViewMode();
+    });
+
+    // 總決賽結算通知
+    socket.on('game4_game_over', (data) => {
+      const modal = document.getElementById('grandChampionshipModal');
+      if (!modal) return;
+
+      if (data.winner) {
+        document.getElementById('champWinnerName').innerText = data.winner.name;
+        document.getElementById('champWinnerScore').innerText = `累積總分：${data.winner.score} 分 (二進位: ${data.winner.binaryScore})`;
+      }
+
+      const list = document.getElementById('champRankingsList');
+      list.innerHTML = '';
+      (data.rankings || []).forEach((r, idx) => {
+        const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : '🎖️'));
+        const div = document.createElement('div');
+        div.className = 'p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between';
+        div.innerHTML = `
+          <span class="flex items-center gap-2">
+            <span>${medal}</span>
+            <span class="font-bold text-white">${r.name}</span>
+          </span>
+          <span class="text-amber-400 font-bold">${r.score} 分 <span class="text-xs text-slate-500">(${r.binaryScore}_2)</span></span>
+        `;
+        list.appendChild(div);
+      });
+
+      modal.classList.remove('hidden');
+      if (window.sound && typeof sound.playVictory === 'function') sound.playVictory();
+    });
+
+    // 全局狀態同步
+    socket.on('state_sync', (state) => {
+      if (state.groups && myGroupId) {
+        myGroupData = state.groups[myGroupId];
+      }
+      if (state.game4) {
+        game4State = state.game4;
+        isTurnGroup = myGroupId === state.game4.turnGroup;
+        updateViewMode();
+      }
+    });
+
+    // 初始渲染對照表
+    renderMorseReferenceGrid();
+  </script>
+</body>
+</html>

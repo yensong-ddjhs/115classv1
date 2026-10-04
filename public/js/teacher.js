@@ -85,32 +85,67 @@ socket.on('update_teacher_score', (data) => {
   updateGroupCardScore(data.groupId, data.totalScore, data.binaryScore);
 });
 
-// 更新遊戲狀態標籤
+// 更新遊戲狀態標籤 (支援 LOBBY, GROUPED, GAME_START, GAME_OVER)
 function updateStatusBadge(status) {
   const badge = document.getElementById('gameStatusBadge');
   const startBtn = document.getElementById('startGameBtn');
-  if (status === 'in_progress') {
+  if (status === 'GAME_START' || status === 'in_progress') {
     badge.className = 'text-xs px-2.5 py-0.5 rounded-full font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 animate-pulse';
     badge.innerText = '⚡ 競賽進行中';
     startBtn.innerHTML = '<span>⚡ 遊戲進行中</span>';
     startBtn.classList.remove('from-emerald-500', 'to-teal-600');
     startBtn.classList.add('from-purple-600', 'to-indigo-600');
+  } else if (status === 'GROUPED') {
+    badge.className = 'text-xs px-2.5 py-0.5 rounded-full font-semibold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30';
+    badge.innerText = '👥 分組就緒 (準備中)';
+    startBtn.innerHTML = `<span>🚀 開始遊戲 ${selectedGame}</span>`;
+    startBtn.classList.add('from-emerald-500', 'to-teal-600');
+    startBtn.classList.remove('from-purple-600', 'to-indigo-600');
+  } else if (status === 'GAME_OVER') {
+    badge.className = 'text-xs px-2.5 py-0.5 rounded-full font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30';
+    badge.innerText = '🏆 競賽結算完畢';
+    startBtn.innerHTML = '<span>🔄 重新開始</span>';
   } else {
     badge.className = 'text-xs px-2.5 py-0.5 rounded-full font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30';
-    badge.innerText = '等待開始';
-    startBtn.innerHTML = '<span>🚀 遊戲開始 (切換第一關)</span>';
+    badge.innerText = '⏳ 大廳等待中';
+    startBtn.innerHTML = `<span>🚀 開始遊戲 ${selectedGame}</span>`;
     startBtn.classList.add('from-emerald-500', 'to-teal-600');
     startBtn.classList.remove('from-purple-600', 'to-indigo-600');
   }
 }
 
-// 更新在線人數
+// 更新在線人數與大廳監控面板
 function updateOnlineCount() {
   if (!currentGameState || !currentGameState.students) return;
   const students = Object.values(currentGameState.students);
   const online = students.filter(s => s.online).length;
   const total = currentGameState.numStudents || students.length;
   document.getElementById('onlineCount').innerText = `${online} / ${total}`;
+  renderTeacherLobbyMonitor();
+}
+
+// 即時渲染大廳登入學生清單（1號、5號、10號...）
+function renderTeacherLobbyMonitor() {
+  const container = document.getElementById('teacherLobbyMonitorList');
+  if (!container || !currentGameState) return;
+
+  const total = currentGameState.numStudents || 30;
+  const students = currentGameState.students || {};
+
+  container.innerHTML = '';
+  for (let i = 1; i <= total; i++) {
+    const sId = `s${String(i).padStart(2, '0')}`;
+    const sData = students[sId];
+    const isOnline = sData && sData.online;
+
+    const span = document.createElement('span');
+    span.className = `px-2 py-1 rounded-lg border text-xs font-mono flex items-center gap-1.5 transition-all ${isOnline ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-bold shadow-sm shadow-emerald-500/20' : 'bg-slate-950/60 text-slate-600 border-slate-800'}`;
+    span.innerHTML = `
+      <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 shadow-sm shadow-emerald-400 animate-pulse' : 'bg-slate-700'}"></span>
+      <span>${i}號 (${sId})</span>
+    `;
+    container.appendChild(span);
+  }
 }
 
 // 格式化二進位位元與權重標籤
@@ -294,13 +329,19 @@ function toggleAllAnswers() {
   renderGroups();
 }
 
+// 老師點擊「廣播分組 / 進入準備階段」
+function enterGroupedStage() {
+  sound.playKey();
+  socket.emit('teacher_enter_grouped');
+}
+
 // 老師點擊「隨機分組」
 function generateGroups() {
   sound.playKey();
   const numStudents = document.getElementById('numStudents').value;
   const numGroups = document.getElementById('numGroups').value;
 
-  if (confirm(`確定要將 ${numStudents} 位學生隨機分配至 ${numGroups} 組嗎？\n這將重置目前組別名單與比分。`)) {
+  if (confirm(`確定要將 ${numStudents} 位學生隨機分配至 ${numGroups} 組嗎？\n這將重置目前組別名單並廣播分組結果至學生端。`)) {
     window.revealedAnswers = {};
     socket.emit('generate_groups', { numStudents, numGroups });
   }
@@ -351,21 +392,30 @@ function updateGameStageBtns() {
     }
   });
 
-  // 切換大螢幕視圖：遊戲三上帝視角 VS 遊戲一/二小組卡片
+  // 切換大螢幕視圖：遊戲四 (摩斯對決) VS 遊戲三 (迷霧上帝視角) VS 遊戲一/二 (小組卡片)
   const groupsContainer = document.getElementById('groupsContainer');
   const stage3Section = document.getElementById('stage3Section');
-  if (selectedGame === 3) {
+  const stage4Section = document.getElementById('stage4Section');
+
+  if (selectedGame === 4) {
+    if (groupsContainer) groupsContainer.classList.add('hidden');
+    if (stage3Section) stage3Section.classList.add('hidden');
+    if (stage4Section) stage4Section.classList.remove('hidden');
+    renderGame4Dashboard();
+  } else if (selectedGame === 3) {
     if (groupsContainer) groupsContainer.classList.add('hidden');
     if (stage3Section) stage3Section.classList.remove('hidden');
+    if (stage4Section) stage4Section.classList.add('hidden');
     initTeacherStage3();
   } else {
     if (groupsContainer) groupsContainer.classList.remove('hidden');
     if (stage3Section) stage3Section.classList.add('hidden');
+    if (stage4Section) stage4Section.classList.add('hidden');
   }
 
   // 同步更新開始按鈕文字
   const startBtn = document.getElementById('startGameBtn');
-  if (startBtn && currentGameState && currentGameState.status !== 'in_progress') {
+  if (startBtn && currentGameState && currentGameState.status !== 'GAME_START' && currentGameState.status !== 'in_progress') {
     startBtn.querySelector('span').innerText =
       `🚀 發布遊戲 ${selectedGame} — 關卡 ${selectedStage}`;
   }
@@ -801,4 +851,242 @@ function toggleModalDecimal(id) {
 function closeTeacherVictoryModal() {
   document.getElementById('teacherVictoryModal').classList.add('hidden');
 }
+
+// ====================================================
+// 遊戲四 (凱撒摩斯密碼小隊對決) 教師端大螢幕渲染與控制邏輯
+// ====================================================
+
+function renderGame4Dashboard() {
+  if (!currentGameState || !currentGameState.game4) return;
+  const g4 = currentGameState.game4;
+
+  // 頂部回合與出題組標章
+  const roundBadge = document.getElementById('t4RoundBadge');
+  if (roundBadge) roundBadge.innerText = `Round ${g4.round} / ${g4.totalRounds}`;
+
+  const turnGroup = currentGameState.groups && currentGameState.groups[g4.turnGroup];
+  const turnGroupName = turnGroup ? turnGroup.name : g4.turnGroup;
+  const turnGroupEl = document.getElementById('t4TurnGroupName');
+  if (turnGroupEl) turnGroupEl.innerText = turnGroupName;
+
+  const phaseBadge = document.getElementById('t4PhaseBadge');
+  if (phaseBadge) {
+    if (g4.phase === 'submitting_words') {
+      phaseBadge.innerText = '出題組鍵入中';
+      phaseBadge.className = 'px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[11px] font-bold';
+    } else if (g4.phase === 'decrypting') {
+      phaseBadge.innerText = '解密組破譯答題中';
+      phaseBadge.className = 'px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono text-[11px] font-bold';
+    } else if (g4.phase === 'round_result') {
+      phaseBadge.innerText = '本回合已結算';
+      phaseBadge.className = 'px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[11px] font-bold';
+    } else if (g4.phase === 'game_over') {
+      phaseBadge.innerText = '全部回合結束 (GAME OVER)';
+      phaseBadge.className = 'px-2.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 font-mono text-[11px] font-bold';
+    }
+  }
+
+  // 摩斯密碼與單字
+  const morseDisplay = document.getElementById('t4MorseDisplay');
+  if (morseDisplay) morseDisplay.innerText = g4.morseCode || '---';
+
+  const origEl = document.getElementById('t4OriginalWord');
+  if (origEl) origEl.innerText = g4.originalWord || '---';
+
+  const shiftEl = document.getElementById('t4ShiftedWord');
+  if (shiftEl) shiftEl.innerText = g4.shiftedWord || '---';
+
+  // 出題組組員輸入狀態
+  const inputsContainer = document.getElementById('t4GroupInputsContainer');
+  if (inputsContainer) {
+    inputsContainer.innerHTML = '';
+    const members = turnGroup ? (turnGroup.members || []) : [];
+    const inputs = g4.groupInputs || {};
+
+    if (members.length === 0) {
+      inputsContainer.innerHTML = '<span class="text-slate-500 italic">尚無組員</span>';
+    } else {
+      members.forEach(mId => {
+        const hasInput = inputs[mId] && inputs[mId].letter;
+        const letter = hasInput ? inputs[mId].letter : '?';
+        const shifted = hasInput ? inputs[mId].shifted : '-';
+        const isOnline = currentGameState.students && currentGameState.students[mId] && currentGameState.students[mId].online;
+
+        const card = document.createElement('div');
+        card.className = `p-2.5 rounded-xl border flex flex-col items-center min-w-[70px] ${hasInput ? 'bg-amber-950/40 border-amber-500/50 text-amber-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`;
+        card.innerHTML = `
+          <div class="flex items-center gap-1 text-[11px] font-mono">
+            <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
+            <span>${mId}</span>
+          </div>
+          <div class="text-xl font-black font-mono my-1 ${hasInput ? 'text-white' : 'text-slate-600'}">${letter}</div>
+          <div class="text-[10px] text-amber-400 font-mono">+2: ${shifted}</div>
+        `;
+        inputsContainer.appendChild(card);
+      });
+    }
+  }
+
+  // 各解密組作答狀態
+  const subContainer = document.getElementById('t4SubmissionsList');
+  if (subContainer) {
+    subContainer.innerHTML = '';
+    const allGroupKeys = Object.keys(currentGameState.groups || {});
+    const submissions = g4.submissions || {};
+
+    allGroupKeys.forEach(gId => {
+      if (gId === g4.turnGroup) return; // 出題組略過
+      const gName = currentGameState.groups[gId]?.name || gId;
+      const sub = submissions[gId];
+
+      const item = document.createElement('div');
+      item.className = `p-2.5 rounded-xl border flex items-center justify-between ${sub ? 'bg-emerald-950/30 border-emerald-500/40' : 'bg-slate-950/60 border-slate-800 text-slate-500'}`;
+      if (sub) {
+        item.innerHTML = `
+          <div>
+            <div class="font-bold text-white">${gName} <span class="text-[10px] text-slate-400 font-normal">(${sub.studentId})</span></div>
+            <div class="text-[11px] text-slate-400">作答：<span class="font-mono text-cyan-300 font-bold">${sub.answer}</span> (對 ${sub.correctCount}/${sub.targetLen} 字)</div>
+          </div>
+          <div class="text-right">
+            <div class="font-black text-amber-400 text-sm font-mono">+${sub.scoreEarned} 分</div>
+            <div class="text-[10px] text-slate-400">${sub.timeTaken}s</div>
+          </div>
+        `;
+      } else {
+        item.innerHTML = `
+          <div>
+            <div class="font-bold text-slate-400">${gName}</div>
+            <div class="text-[11px] text-slate-600 italic">尚未提交解答...</div>
+          </div>
+          <div class="text-xs font-mono text-slate-600">待命中</div>
+        `;
+      }
+      subContainer.appendChild(item);
+    });
+  }
+
+  // 小隊累計排行榜
+  const rankContainer = document.getElementById('t4RankingsList');
+  if (rankContainer) {
+    rankContainer.innerHTML = '';
+    const groupKeys = Object.keys(currentGameState.groups || {});
+    const rankings = groupKeys.map(gId => {
+      const score = (g4.groupScores && g4.groupScores[gId]) || 0;
+      return {
+        id: gId,
+        name: currentGameState.groups[gId]?.name || gId,
+        score: score,
+        binaryScore: score.toString(2)
+      };
+    }).sort((a, b) => b.score - a.score);
+
+    rankings.forEach((r, idx) => {
+      const medal = idx === 0 ? '🥇' : (idx === 1 ? '🥈' : (idx === 2 ? '🥉' : '●'));
+      const div = document.createElement('div');
+      div.className = 'p-2 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between';
+      div.innerHTML = `
+        <span class="flex items-center gap-1.5 font-bold ${idx === 0 ? 'text-amber-400' : 'text-slate-300'}">
+          <span>${medal}</span>
+          <span>${r.name}</span>
+        </span>
+        <span class="font-mono font-bold text-cyan-300">
+          ${showAllAnswers ? `${r.score} 分` : `二進位: ${r.binaryScore}`}
+        </span>
+      `;
+      rankContainer.appendChild(div);
+    });
+  }
+}
+
+// 模擬遊戲四回合進度
+function simulateGame4Round() {
+  sound.playScoreGained();
+  socket.emit('game4_simulate_round');
+}
+
+// 手動強制結算遊戲四當前回合
+function settleGame4RoundManual() {
+  sound.playTick();
+  socket.emit('game4_teacher_settle_round');
+}
+
+// 手動進入遊戲四下一輪
+function nextGame4RoundManual() {
+  sound.playKey();
+  socket.emit('game4_teacher_next_round');
+}
+
+// 遊戲四 Socket 監聽
+socket.on('game4_inputs_updated', (data) => {
+  if (currentGameState && currentGameState.game4) {
+    currentGameState.game4.groupInputs = data.inputs;
+    if (selectedGame === 4) renderGame4Dashboard();
+  }
+});
+
+socket.on('game4_word_broadcast', (data) => {
+  if (currentGameState && currentGameState.game4) {
+    currentGameState.game4.phase = 'decrypting';
+    currentGameState.game4.morseCode = data.morseCode;
+    currentGameState.game4.round = data.round;
+    if (selectedGame === 4) renderGame4Dashboard();
+  }
+  const feed = document.getElementById('liveFeedText');
+  if (feed) {
+    feed.innerHTML = `📡 <span class="text-amber-400 font-bold">${data.turnGroupName}</span> 已完成凱撒加密 (+2) 並全班推播摩斯密碼！解密組全速破譯中！`;
+  }
+});
+
+socket.on('game4_submission_received', (data) => {
+  if (currentGameState && currentGameState.game4) {
+    currentGameState.game4.submissions = data.submissions;
+    if (selectedGame === 4) renderGame4Dashboard();
+  }
+  sound.playScoreGained();
+  const feed = document.getElementById('liveFeedText');
+  if (feed) {
+    feed.innerHTML = `🎯 <span class="text-cyan-400 font-bold">${data.groupName}</span> (${data.studentId}) 完成解密作答！答對 <span class="text-emerald-400 font-bold">${data.correctCount}/${data.totalCount}</span> 字，獲得 <span class="text-amber-400 font-bold">+${data.scoreEarned}</span> 分！`;
+  }
+});
+
+socket.on('game4_round_settled', (data) => {
+  if (currentGameState && currentGameState.game4) {
+    currentGameState.game4.phase = 'round_result';
+    currentGameState.game4.originalWord = data.originalWord;
+    currentGameState.game4.shiftedWord = data.shiftedWord;
+    currentGameState.game4.morseCode = data.morseCode;
+    currentGameState.game4.submissions = data.submissions;
+    currentGameState.game4.groupScores = data.totalScores;
+    if (selectedGame === 4) renderGame4Dashboard();
+  }
+  sound.playVictory();
+});
+
+socket.on('game4_new_round', (data) => {
+  if (currentGameState && currentGameState.game4) {
+    currentGameState.game4.round = data.round;
+    currentGameState.game4.totalRounds = data.totalRounds;
+    currentGameState.game4.turnGroup = data.turnGroup;
+    currentGameState.game4.phase = 'submitting_words';
+    currentGameState.game4.groupInputs = {};
+    currentGameState.game4.originalWord = '';
+    currentGameState.game4.shiftedWord = '';
+    currentGameState.game4.morseCode = '';
+    currentGameState.game4.submissions = {};
+    if (selectedGame === 4) renderGame4Dashboard();
+  }
+});
+
+socket.on('game4_game_over', (data) => {
+  if (currentGameState && currentGameState.game4) {
+    currentGameState.game4.phase = 'game_over';
+    currentGameState.status = 'GAME_OVER';
+    if (selectedGame === 4) renderGame4Dashboard();
+  }
+  showTeacherVictoryModal({
+    reason: '所有小組皆完成出題與解密對決！',
+    winner: data.winner,
+    rankings: data.rankings
+  });
+});
 
