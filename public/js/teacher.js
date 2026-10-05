@@ -54,7 +54,8 @@ socket.on('game_switched', (data) => {
 // 學生連線狀態變更
 socket.on('student_status_changed', (data) => {
   if (currentGameState) {
-    currentGameState.students = data.students;
+    if (data.students) currentGameState.students = data.students;
+    if (data.activeStudents) currentGameState.activeStudents = data.activeStudents;
     updateOnlineCount();
     renderGroups();
   }
@@ -116,36 +117,46 @@ function updateStatusBadge(status) {
 
 // 更新在線人數與大廳監控面板
 function updateOnlineCount() {
-  if (!currentGameState || !currentGameState.students) return;
-  const students = Object.values(currentGameState.students);
-  const online = students.filter(s => s.online).length;
-  const total = currentGameState.numStudents || students.length;
-  document.getElementById('onlineCount').innerText = `${online} / ${total}`;
+  if (!currentGameState) return;
+  const activeStudents = currentGameState.activeStudents || 
+    Object.values(currentGameState.students || {}).filter(s => s && s.online);
+  const total = currentGameState.numStudents || 30;
+  document.getElementById('onlineCount').innerText = `${activeStudents.length} / ${total}`;
   renderTeacherLobbyMonitor();
 }
 
-// 即時渲染大廳登入學生清單（1號、5號、10號...）
+// 即時渲染大廳登入學生清單 (僅渲染當前真實連線的 activeStudents，禁止寫死固定座號清單)
 function renderTeacherLobbyMonitor() {
   const container = document.getElementById('teacherLobbyMonitorList');
   if (!container || !currentGameState) return;
 
-  const total = currentGameState.numStudents || 30;
-  const students = currentGameState.students || {};
+  const activeStudents = currentGameState.activeStudents || 
+    Object.values(currentGameState.students || {}).filter(s => s && s.online);
 
   container.innerHTML = '';
-  for (let i = 1; i <= total; i++) {
-    const sId = `s${String(i).padStart(2, '0')}`;
-    const sData = students[sId];
-    const isOnline = sData && sData.online;
 
+  if (activeStudents.length === 0) {
+    container.innerHTML = '<span class="text-slate-500 italic text-xs py-1">目前尚無學生在線，請等待學生進入大廳</span>';
+    return;
+  }
+
+  // 依照座號排序渲染
+  const sortedStudents = [...activeStudents].sort((a, b) => {
+    const numA = a.seatNumber || parseInt(a.id.replace(/\D/g, '') || 0);
+    const numB = b.seatNumber || parseInt(b.id.replace(/\D/g, '') || 0);
+    return numA - numB;
+  });
+
+  sortedStudents.forEach(st => {
+    const seatNum = st.seatNumber || parseInt(st.id.replace(/\D/g, '') || 0);
     const span = document.createElement('span');
-    span.className = `px-2 py-1 rounded-lg border text-xs font-mono flex items-center gap-1.5 transition-all ${isOnline ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-bold shadow-sm shadow-emerald-500/20' : 'bg-slate-950/60 text-slate-600 border-slate-800'}`;
+    span.className = 'px-2.5 py-1 rounded-lg border text-xs font-mono flex items-center gap-1.5 transition-all bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-bold shadow-sm shadow-emerald-500/20 animate-fade-in';
     span.innerHTML = `
-      <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 shadow-sm shadow-emerald-400 animate-pulse' : 'bg-slate-700'}"></span>
-      <span>${i}號 (${sId})</span>
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400 animate-pulse"></span>
+      <span>${seatNum}號 (${st.id})</span>
     `;
     container.appendChild(span);
-  }
+  });
 }
 
 // 格式化二進位位元與權重標籤
@@ -428,13 +439,24 @@ function updateLiveFeedStageChange(data) {
   feed.innerHTML = `老師切換至 <span class="text-cyan-400 font-bold font-mono">遊戲 ${data.currentGame}</span> — <span class="text-amber-400 font-bold">關卡 ${data.currentStage}</span>，學生端畫面已同步切換！`;
 }
 
-// 老師點擊「重置遊戲」
+// 老師點擊「重置遊戲」 (強制全域重置功能 Hard State Reset)
 function resetGame() {
   sound.playTick();
-  if (confirm('確定要重置所有小組的分數與闖關狀態嗎？')) {
+  if (confirm('確定要執行全域強制重置嗎？\n這將重置所有組別分數，並強制全體學生端退回初始座號登入頁面！')) {
     window.revealedAnswers = {};
-    socket.emit('reset_game');
+    socket.emit('force_reset_lobby');
   }
+}
+
+// 變更班級人數監聽
+const numStudentsInput = document.getElementById('numStudents');
+if (numStudentsInput) {
+  numStudentsInput.addEventListener('change', (e) => {
+    const val = parseInt(e.target.value) || 30;
+    if (confirm(`確定要將班級人數變更為 ${val} 人並重置大廳嗎？`)) {
+      socket.emit('change_num_students', { numStudents: val });
+    }
+  });
 }
 
 // 模擬學生得分 (供老師備課測試)
@@ -858,6 +880,7 @@ function closeTeacherVictoryModal() {
 
 function renderGame4Dashboard() {
   if (!currentGameState || !currentGameState.game4) return;
+  renderGame4BinaryRefTable();
   const g4 = currentGameState.game4;
 
   // 頂部回合與出題組標章
@@ -908,19 +931,31 @@ function renderGame4Dashboard() {
     } else {
       members.forEach(mId => {
         const hasInput = inputs[mId] && inputs[mId].letter;
-        const letter = hasInput ? inputs[mId].letter : '?';
-        const shifted = hasInput ? inputs[mId].shifted : '-';
+        const typing = (g4.typingStatus && g4.typingStatus[mId]) || null;
+        const letter = hasInput ? inputs[mId].letter : (typing && typing.letter ? typing.letter : '?');
+        const shifted = hasInput ? inputs[mId].shifted : (typing && typing.shifted ? typing.shifted : '-');
         const isOnline = currentGameState.students && currentGameState.students[mId] && currentGameState.students[mId].online;
+        const isCurrentTurn = (g4.currentTurnPlayerId === mId);
+
+        let statusBadge = '<span class="text-[10px] text-slate-500">待命中</span>';
+        if (hasInput || (typing && typing.isSubmitted)) {
+          statusBadge = '<span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">✅ 已送出</span>';
+        } else if (typing && typing.letter) {
+          statusBadge = '<span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold animate-pulse">⌨️ 輸入中</span>';
+        } else if (isCurrentTurn) {
+          statusBadge = '<span class="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-bold animate-pulse">👉 當前輪到</span>';
+        }
 
         const card = document.createElement('div');
-        card.className = `p-2.5 rounded-xl border flex flex-col items-center min-w-[70px] ${hasInput ? 'bg-amber-950/40 border-amber-500/50 text-amber-200' : 'bg-slate-950 border-slate-800 text-slate-500'}`;
+        card.className = `p-2.5 rounded-xl border flex flex-col items-center min-w-[75px] ${hasInput ? 'bg-amber-950/40 border-amber-500/50 text-amber-200' : (typing && typing.letter ? 'bg-amber-950/20 border-amber-500/30 text-amber-300' : (isCurrentTurn ? 'bg-cyan-950/30 border-cyan-500/40 text-cyan-200' : 'bg-slate-950 border-slate-800 text-slate-500'))}`;
         card.innerHTML = `
           <div class="flex items-center gap-1 text-[11px] font-mono">
             <span class="w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
             <span>${mId}</span>
           </div>
-          <div class="text-xl font-black font-mono my-1 ${hasInput ? 'text-white' : 'text-slate-600'}">${letter}</div>
-          <div class="text-[10px] text-amber-400 font-mono">+2: ${shifted}</div>
+          <div class="text-xl font-black font-mono my-1 ${hasInput ? 'text-white' : (typing && typing.letter ? 'text-amber-300' : 'text-slate-600')}">${letter}</div>
+          <div class="text-[10px] text-amber-400 font-mono mb-1">+2: ${shifted}</div>
+          ${statusBadge}
         `;
         inputsContainer.appendChild(card);
       });
@@ -1017,6 +1052,36 @@ function nextGame4RoundManual() {
 }
 
 // 遊戲四 Socket 監聽
+// Bug 2: 監聽學生即時打字狀態 (student_typing)
+socket.on('student_typing', (data) => {
+  if (!currentGameState || !currentGameState.game4) return;
+  if (!currentGameState.game4.typingStatus) currentGameState.game4.typingStatus = {};
+  currentGameState.game4.typingStatus[data.studentId] = data;
+  if (selectedGame === 4) renderGame4Dashboard();
+});
+
+// Bug 1: 監聽全域遊戲四狀態廣播 (STAGE_4_STATE_UPDATE)
+socket.on('STAGE_4_STATE_UPDATE', (data) => {
+  if (!currentGameState) return;
+  currentGameState.game4 = data;
+  if (selectedGame === 4) renderGame4Dashboard();
+});
+
+// Bug 4: 監聽輪次重置指令 (RESET_TURN_INPUT)
+socket.on('RESET_TURN_INPUT', (data) => {
+  if (currentGameState && currentGameState.game4) {
+    currentGameState.game4.round = data.round;
+    currentGameState.game4.totalRounds = data.maxRounds || data.totalRounds;
+    currentGameState.game4.turnGroup = data.turnGroup;
+    currentGameState.game4.currentTurnPlayerId = data.currentTurnPlayerId;
+    currentGameState.game4.turnGroupMembers = data.turnGroupMembers;
+    currentGameState.game4.groupInputs = {};
+    currentGameState.game4.typingStatus = {};
+    currentGameState.game4.currentWords = [];
+    if (selectedGame === 4) renderGame4Dashboard();
+  }
+});
+
 socket.on('game4_inputs_updated', (data) => {
   if (currentGameState && currentGameState.game4) {
     currentGameState.game4.groupInputs = data.inputs;
@@ -1090,3 +1155,41 @@ socket.on('game4_game_over', (data) => {
   });
 });
 
+// 強制推進遊戲四下一階段
+function forceAdvanceGame4() {
+  sound.playTick();
+  if (confirm('確定要強制推進至下一階段嗎？未提交的學生將被跳過。')) {
+    socket.emit('game4_force_advance');
+  }
+}
+
+// 跳過未回應學生
+function skipAbsentStudents() {
+  sound.playTick();
+  if (confirm('確定要跳過所有未回應學生並強制結算嗎？')) {
+    socket.emit('game4_skip_absent');
+  }
+}
+
+// 渲染遊戲四二進位字母對照表 (教師端看板用)
+function renderGame4BinaryRefTable() {
+  const grid = document.getElementById('t4BinaryRefGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  for (let i = 0; i < 26; i++) {
+    const letter = String.fromCharCode(65 + i);
+    const binaryStr = (i + 1).toString(2).padStart(5, '0');
+    const card = document.createElement('div');
+    card.className = 'p-1.5 rounded-lg bg-slate-950 border border-amber-800/40 flex items-center justify-between text-slate-300 text-[10px] font-mono';
+    card.innerHTML = `<span class="font-black text-amber-400">${letter}</span><span class="text-cyan-300">${binaryStr}</span>`;
+    grid.appendChild(card);
+  }
+}
+
+// 教師端遊戲四 teacher log 接收
+socket.on('game4_teacher_log', (data) => {
+  const feed = document.getElementById('liveFeedText');
+  if (feed) {
+    feed.innerHTML = `<span class="text-rose-400 font-bold">${data.text}</span>`;
+  }
+});

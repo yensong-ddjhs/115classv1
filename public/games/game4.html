@@ -99,6 +99,11 @@
           <p class="text-[11px] text-slate-400">大小寫皆可，系統自動轉大寫並即時同步給隊友</p>
         </div>
 
+        <!-- 身份比對驗證與等待提示橫幅 (Bug 1: Identity Matching Guard) -->
+        <div id="turnPlayerStatusBanner" class="p-3 rounded-2xl bg-amber-950/50 border border-amber-500/40 text-amber-200 text-xs font-bold text-center">
+          目前由 1 號同學輸入中...
+        </div>
+
         <div class="flex items-center justify-center gap-3">
           <input
             type="text"
@@ -172,6 +177,21 @@
           若有組員缺席或尚未輸入，系統將使用已輸入字母（或自動補足）合成單字，絕不卡關！
         </p>
       </div>
+
+        <!-- 二進位字母對照表輔助 (出題組也能查閱) -->
+        <details class="group bg-slate-950/50 border border-amber-800/40 rounded-2xl p-4 text-xs cursor-pointer">
+          <summary class="font-bold text-slate-300 flex items-center justify-between list-none">
+            <span class="flex items-center gap-2 text-amber-400">
+              <span>📋</span>
+              <span>點擊展開：26 字母二進位碼對照表 (A=00001 ~ Z=11010)</span>
+            </span>
+            <span class="group-open:rotate-180 transition-transform text-slate-500">▼</span>
+          </summary>
+          <div class="mt-4 pt-3 border-t border-slate-800/80 space-y-2">
+            <p class="text-[11px] text-slate-400">請利用此二進位對照表，推算並解碼對手的英文字母。（A=1→00001, B=2→00010...Z=26→11010）</p>
+            <div id="binaryRefGridEncoder" class="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-1.5 font-mono text-[11px]"></div>
+          </div>
+        </details>
     </div>
 
     <!-- 視圖 2: 解密組操作面板 (Decryption Panel) -->
@@ -271,6 +291,12 @@
           <div id="morseReferenceGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-1.5 font-mono text-[11px]">
             <!-- 動態生成 26 個字母對照 -->
           </div>
+
+            <!-- 26 字母二進位對照表 -->
+            <div class="mt-3 pt-3 border-t border-slate-800/60">
+              <div class="text-[11px] text-amber-400 font-bold mb-2">📋 26 字母二進位碼對照表（A=00001 ... Z=11010）：</div>
+              <div id="binaryRefGridDecoder" class="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-1.5 font-mono text-[11px]"></div>
+            </div>
         </div>
       </details>
     </div>
@@ -397,6 +423,7 @@
     const urlParams = new URLSearchParams(window.location.search);
     let myStudentId = localStorage.getItem('studentId') || urlParams.get('id') || 's01';
     myStudentId = myStudentId.trim().toLowerCase();
+    const currentUser = { studentId: myStudentId };
 
     // 摩斯密碼對照表
     const MORSE_MAP = {
@@ -407,6 +434,30 @@
       'U': '..-',   'V': '...-',  'W': '.--',   'X': '-..-',  'Y': '-.--',
       'Z': '--..'
     };
+
+    // 26 字母二進位碼對照表 (A=1=00001, B=2=00010, ..., Z=26=11010)
+    const BINARY_MAP = {};
+    for (let i = 0; i < 26; i++) {
+      const letter = String.fromCharCode(65 + i);
+      const num = i + 1;
+      BINARY_MAP[letter] = num.toString(2).padStart(5, '0');
+    }
+
+    // 初始化二進位字母對照表
+    function renderBinaryReferenceGrid(containerId) {
+      const grid = document.getElementById(containerId);
+      if (!grid) return;
+      grid.innerHTML = '';
+      Object.keys(BINARY_MAP).forEach(letter => {
+        const card = document.createElement('div');
+        card.className = 'p-1.5 rounded-lg bg-slate-900 border border-amber-800/40 flex items-center justify-between text-slate-300';
+        card.innerHTML = `
+          <span class="font-black text-amber-400">${letter}</span>
+          <span class="text-cyan-300 font-mono tracking-wider">${BINARY_MAP[letter]}</span>
+        `;
+        grid.appendChild(card);
+      });
+    }
 
     // 本地狀態快取
     let myGroupId = null;
@@ -510,7 +561,55 @@
       handleLetterInputChange();
     }
 
-    // 處理出題組字母輸入變更
+    // 學生端身份比對驗證 (Bug 1: Identity Matching Guard)
+    function applyStage4IdentityGuard(state) {
+      if (!state) state = game4State;
+      if (!state) return;
+
+      const currentTurnPlayerId = state.currentTurnPlayerId;
+      const turnSeatNum = currentTurnPlayerId ? parseInt(currentTurnPlayerId.replace(/\D/g, '') || 0) : null;
+      const letterInput = document.getElementById('letterInput');
+      const banner = document.getElementById('turnPlayerStatusBanner');
+      const waitingText = document.getElementById('waitingTurnGroupText');
+
+      // 比對當前登入者是否為該輪出題者
+      const isMyTurn = (currentUser.studentId && currentTurnPlayerId && currentUser.studentId.toLowerCase() === currentTurnPlayerId.toLowerCase());
+
+      if (isTurnGroup && state.phase === 'submitting_words') {
+        if (isMyTurn) {
+          // 只有當 currentUser.studentId === currentTurnPlayerId 時，才將輸入框解鎖 (disabled = false)
+          if (letterInput) {
+            letterInput.disabled = false;
+            letterInput.removeAttribute('disabled');
+            letterInput.classList.remove('opacity-50', 'cursor-not-allowed');
+            setTimeout(() => letterInput.focus(), 100);
+          }
+          if (banner) {
+            banner.innerHTML = '👉 <span class="font-black text-emerald-300">輪到您出題！</span>請在下方鍵入 1 個英文字母';
+            banner.className = 'p-3 rounded-2xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-200 text-xs font-bold text-center animate-pulse';
+          }
+        } else {
+          // 其他非當前輪到的學生，畫面保持「觀看/等待模式」，並顯示提示：「目前由 [座號] 號同學輸入中...」
+          if (letterInput) {
+            letterInput.disabled = true;
+            letterInput.setAttribute('disabled', 'true');
+            letterInput.classList.add('opacity-50', 'cursor-not-allowed');
+          }
+          if (banner) {
+            const promptText = turnSeatNum ? `目前由 ${turnSeatNum} 號同學輸入中...` : '出題組組員輸入中...';
+            banner.innerHTML = `⏳ <span class="font-bold text-amber-300">${promptText}</span> 請稍候`;
+            banner.className = 'p-3 rounded-2xl bg-amber-950/50 border border-amber-500/40 text-amber-200 text-xs font-bold text-center';
+          }
+        }
+      } else {
+        if (waitingText) {
+          const promptText = turnSeatNum ? `目前由 ${turnSeatNum} 號同學輸入中...` : '出題組正在輪流鍵入字母並加密中...';
+          waitingText.innerText = promptText;
+        }
+      }
+    }
+
+    // 處理出題組字母輸入變更 (Bug 2: 打字狀態即時廣播 student_typing)
     function handleLetterInputChange() {
       const input = document.getElementById('letterInput');
       const val = (input.value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
@@ -520,6 +619,16 @@
         document.getElementById('previewOriginalLetter').innerText = '-';
         document.getElementById('previewShiftedLetter').innerText = '-';
         document.getElementById('previewMorseLetter').innerText = '-';
+
+        // 即時向伺服器發送 student_typing
+        socket.emit('student_typing', {
+          studentId: currentUser.studentId,
+          input: '',
+          letter: '',
+          shifted: '',
+          morse: '',
+          isSubmitted: false
+        });
         return;
       }
 
@@ -531,14 +640,25 @@
       document.getElementById('previewShiftedLetter').innerText = shiftedChar;
       document.getElementById('previewMorseLetter').innerText = morseChar;
 
-      // 即時發送給伺服器
+      // Bug 2: 即時向伺服器發送 student_typing 事件
+      socket.emit('student_typing', {
+        studentId: currentUser.studentId,
+        input: val,
+        letter: originalChar,
+        shifted: shiftedChar,
+        morse: morseChar,
+        isSubmitted: false
+      });
+
+      // 送至伺服器登記組員輸入
       socket.emit('game4_submit_letter', {
-        studentId: myStudentId,
+        studentId: currentUser.studentId,
         letter: originalChar
       });
     }
 
     document.getElementById('letterInput').addEventListener('input', handleLetterInputChange);
+    document.getElementById('letterInput').addEventListener('change', handleLetterInputChange);
 
     // 出題組點擊送出出題確認
     function confirmAndBroadcastWord() {
@@ -559,7 +679,7 @@
       const timeTaken = ((Date.now() - questionReceiveTime) / 1000).toFixed(1);
 
       socket.emit('game4_submit_decryption', {
-        studentId: myStudentId,
+        studentId: currentUser.studentId,
         answer: answer,
         timeTaken: timeTaken
       }, (res) => {
@@ -589,10 +709,51 @@
       });
     }
 
+    // 解密組即時打字廣播
+    document.getElementById('decryptionAnswerInput').addEventListener('input', (e) => {
+      const val = (e.target.value || '').trim().toUpperCase();
+      socket.emit('student_typing', {
+        studentId: currentUser.studentId,
+        input: val,
+        type: 'decryption',
+        isSubmitted: false
+      });
+    });
+
     // 支援 Enter 鍵送出
     document.getElementById('decryptionAnswerInput').addEventListener('keyup', (e) => {
       if (e.key === 'Enter' && !hasSubmittedAnswer) submitDecryptionAnswer();
     });
+
+    // 組別 ID 正規化比對
+    function normalizeGroupId(id) {
+      if (id === null || id === undefined) return 1;
+      const num = parseInt(String(id).replace(/\D/g, ''));
+      return isNaN(num) ? 1 : num;
+    }
+
+    // 解鎖學生端輸入框 (配合 Bug 1 身份驗證 Guard)
+    function unlockStudentInputUI() {
+      applyStage4IdentityGuard(game4State);
+
+      const ansInput = document.getElementById('decryptionAnswerInput');
+      const submitBtn = document.getElementById('submitAnswerBtn');
+
+      if (!isTurnGroup) {
+        // 答題組 / 解密組：解除答案輸入框與送出按鈕的 disabled 屬性
+        if (ansInput) {
+          ansInput.disabled = false;
+          ansInput.removeAttribute('disabled');
+          ansInput.classList.remove('cursor-not-allowed', 'opacity-50');
+          setTimeout(() => ansInput.focus(), 150);
+        }
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.removeAttribute('disabled');
+          submitBtn.classList.remove('cursor-not-allowed', 'opacity-50');
+        }
+      }
+    }
 
     // 介面視圖切換管理
     function updateViewMode() {
@@ -603,9 +764,12 @@
       const waitingForWordPanel = document.getElementById('waitingForWordPanel');
       const roundResultModal = document.getElementById('roundResultModal');
 
+      // 更新出題組判定 (使用正規化比對以相容 groupId: 1 與 group_1)
+      isTurnGroup = (normalizeGroupId(myGroupId) === normalizeGroupId(game4State.turnGroup));
+
       // 更新頂部 HUD
       document.getElementById('roundDisplay').innerText = `Round ${game4State.round} / ${game4State.totalRounds}`;
-      const myScore = (myGroupId && game4State.groupScores && game4State.groupScores[myGroupId]) || 0;
+      const myScore = (myGroupId && game4State.groupScores && (game4State.groupScores[myGroupId] || game4State.groupScores[normalizeGroupId(myGroupId)])) || 0;
       document.getElementById('myGroupScoreDisplay').innerText = `${myScore} 分`;
 
       const roleBadge = document.getElementById('roleBadge');
@@ -616,6 +780,9 @@
         roleBadge.innerText = '📡 本輪解密組';
         roleBadge.className = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
       }
+
+      // 即時解除輸入鎖定
+      unlockStudentInputUI();
 
       // 階段 1: 出題中
       if (game4State.phase === 'submitting_words') {
@@ -629,7 +796,7 @@
           encoderPanel.classList.add('hidden');
           decoderPanel.classList.add('hidden');
           waitingForWordPanel.classList.remove('hidden');
-          const turnGroupName = (game4State.groups && game4State.groups[game4State.turnGroup]?.name) || game4State.turnGroup;
+          const turnGroupName = (game4State.groups && (game4State.groups[game4State.turnGroup]?.name || game4State.groups[normalizeGroupId(game4State.turnGroup)]?.name)) || `第 ${normalizeGroupId(game4State.turnGroup)} 組`;
           document.getElementById('waitingTurnGroupText').innerText = `${turnGroupName} 正在輪流鍵入字母並加密中...`;
         }
       } 
@@ -637,11 +804,9 @@
       else if (game4State.phase === 'decrypting') {
         roundResultModal.classList.add('hidden');
         if (isTurnGroup) {
-          // 出題組等待其他組答題
           encoderPanel.classList.remove('hidden');
           decoderPanel.classList.add('hidden');
           waitingForWordPanel.classList.add('hidden');
-          // 鎖定出題按鈕
           const confirmBtn = document.getElementById('confirmWordBtn');
           confirmBtn.disabled = true;
           confirmBtn.innerHTML = '<span>📡 題目已推播！其他小組正在解密中...</span>';
@@ -653,7 +818,7 @@
           currentMorseCode = game4State.morseCode || '';
           document.getElementById('morseCodeDisplay').innerText = currentMorseCode || '---';
           document.getElementById('targetLetterCountDisplay').innerText = `${game4State.originalWord ? game4State.originalWord.length : '--'} 個字母`;
-          const turnGroupName = (game4State.groups && game4State.groups[game4State.turnGroup]?.name) || game4State.turnGroup;
+          const turnGroupName = (game4State.groups && (game4State.groups[game4State.turnGroup]?.name || game4State.groups[normalizeGroupId(game4State.turnGroup)]?.name)) || `第 ${normalizeGroupId(game4State.turnGroup)} 組`;
           document.getElementById('currentTurnGroupName').innerText = turnGroupName;
         }
       }
@@ -735,14 +900,33 @@
 
     // ── Socket 事件監聽 ──────────────────────────────────────
 
+    // 心跳包
+    setInterval(() => {
+      if (myStudentId) {
+        socket.emit('student_heartbeat', { studentId: myStudentId });
+      }
+    }, 5000);
+
+    // 強制重置監聽 (FORCE_RESET_LOBBY)
+    socket.on('FORCE_RESET_LOBBY', () => {
+      localStorage.removeItem('studentId');
+      localStorage.removeItem('latestScore');
+      sessionStorage.clear();
+      if (window.parent && window.parent !== window && typeof window.parent.logoutStudent === 'function') {
+        window.parent.logoutStudent();
+      } else {
+        window.location.href = '/';
+      }
+    });
+
     // 初始化與就緒
     socket.emit('game4_init', { studentId: myStudentId });
 
     socket.on('game4_ready', (data) => {
       game4State = data.game4;
       myGroupId = data.groupId;
-      myGroupData = data.groups && data.groups[myGroupId];
-      isTurnGroup = data.isTurnGroup;
+      myGroupData = data.groups && (data.groups[myGroupId] || data.groups[normalizeGroupId(myGroupId)]);
+      isTurnGroup = (normalizeGroupId(myGroupId) === normalizeGroupId(game4State.turnGroup));
 
       document.getElementById('studentIdDisplay').innerText = myStudentId.toUpperCase();
       document.getElementById('studentAvatar').innerText = myStudentId.toUpperCase();
@@ -750,7 +934,77 @@
         document.getElementById('groupBadge').innerText = myGroupData.name;
       }
 
+      unlockStudentInputUI();
       updateViewMode();
+    });
+
+    // 監聽全域狀態更新 (Bug 1: STAGE_4_STATE_UPDATE 身份比對驗證)
+    socket.on('STAGE_4_STATE_UPDATE', (data) => {
+      if (!data) return;
+      game4State = data;
+      if (data.maxRounds) game4State.totalRounds = data.maxRounds;
+      if (data.turnGroup !== undefined) {
+        isTurnGroup = (normalizeGroupId(myGroupId) === normalizeGroupId(data.turnGroup));
+      }
+      applyStage4IdentityGuard(data);
+      updateViewMode();
+    });
+
+    // 監聽輪次切換重置指令 (Bug 4: RESET_TURN_INPUT)
+    socket.on('RESET_TURN_INPUT', (data) => {
+      // 1. 清空上一輪暫存的輸入內容與欄位
+      const letterInput = document.getElementById('letterInput');
+      if (letterInput) {
+        letterInput.value = '';
+        letterInput.disabled = true;
+      }
+      const ansInput = document.getElementById('decryptionAnswerInput');
+      if (ansInput) {
+        ansInput.value = '';
+        ansInput.disabled = false;
+        ansInput.removeAttribute('disabled');
+        ansInput.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+      document.getElementById('previewOriginalLetter').innerText = '-';
+      document.getElementById('previewShiftedLetter').innerText = '-';
+      document.getElementById('previewMorseLetter').innerText = '-';
+      hasSubmittedAnswer = false;
+
+      const feedback = document.getElementById('decryptionFeedback');
+      if (feedback) feedback.classList.add('hidden');
+
+      // 2. 重新根據當前出題組更新狀態
+      if (data) {
+        if (!game4State) game4State = {};
+        game4State.round = data.round;
+        game4State.totalRounds = data.maxRounds || data.totalRounds;
+        game4State.turnGroup = data.turnGroup;
+        game4State.currentTurnPlayerId = data.currentTurnPlayerId;
+        game4State.turnGroupMembers = data.turnGroupMembers;
+        game4State.currentWords = [];
+        game4State.groupInputs = {};
+        game4State.phase = 'submitting_words';
+        isTurnGroup = (normalizeGroupId(myGroupId) === normalizeGroupId(data.turnGroup));
+      }
+
+      applyStage4IdentityGuard(data);
+      updateViewMode();
+    });
+
+    // 遊戲四啟動事件 (START_STAGE_4)：解鎖輸入框
+    socket.on('START_STAGE_4', (data) => {
+      if (data) {
+        if (!game4State) game4State = {};
+        if (data.turnGroup !== undefined) game4State.turnGroup = data.turnGroup;
+        if (data.phase) game4State.phase = data.phase;
+        if (data.round) game4State.round = data.round;
+        if (data.currentTurnPlayerId) game4State.currentTurnPlayerId = data.currentTurnPlayerId;
+        if (data.maxRounds) game4State.totalRounds = data.maxRounds;
+      }
+      isTurnGroup = (normalizeGroupId(myGroupId) === normalizeGroupId(game4State.turnGroup));
+      applyStage4IdentityGuard(data);
+      updateViewMode();
+      if (window.sound && typeof sound.playVictory === 'function') sound.playVictory();
     });
 
     // 隊友字母輸入更新
@@ -772,17 +1026,23 @@
       questionReceiveTime = Date.now();
       hasSubmittedAnswer = false;
 
-      // 重置作答輸入框
+      // 重置作答輸入框並解鎖
       const ansInput = document.getElementById('decryptionAnswerInput');
-      if (ansInput) ansInput.value = '';
+      if (ansInput) {
+        ansInput.value = '';
+        ansInput.disabled = false;
+        ansInput.removeAttribute('disabled');
+      }
       const feedback = document.getElementById('decryptionFeedback');
       if (feedback) feedback.classList.add('hidden');
       const submitBtn = document.getElementById('submitAnswerBtn');
       if (submitBtn) {
         submitBtn.disabled = false;
+        submitBtn.removeAttribute('disabled');
         submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
       }
 
+      unlockStudentInputUI();
       updateViewMode();
       if (window.sound && typeof sound.playVictory === 'function') sound.playVictory();
     });
@@ -814,12 +1074,16 @@
       game4State.morseCode = '';
       game4State.submissions = {};
 
-      isTurnGroup = myGroupId === data.turnGroup;
+      isTurnGroup = (normalizeGroupId(myGroupId) === normalizeGroupId(data.turnGroup));
       hasSubmittedAnswer = false;
 
-      // 重置出題輸入框
+      // 重置出題輸入框並解鎖
       const letInput = document.getElementById('letterInput');
-      if (letInput) letInput.value = '';
+      if (letInput) {
+        letInput.value = '';
+        letInput.disabled = false;
+        letInput.removeAttribute('disabled');
+      }
       document.getElementById('previewOriginalLetter').innerText = '-';
       document.getElementById('previewShiftedLetter').innerText = '-';
       document.getElementById('previewMorseLetter').innerText = '-';
@@ -827,10 +1091,12 @@
       const confirmBtn = document.getElementById('confirmWordBtn');
       if (confirmBtn) {
         confirmBtn.disabled = false;
+        confirmBtn.removeAttribute('disabled');
         confirmBtn.className = 'w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black tracking-wider text-base shadow-xl shadow-amber-500/25 transition-all transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer';
         confirmBtn.innerHTML = '<span>🚀 完成出題並廣播摩斯密碼至全班！</span>';
       }
 
+      unlockStudentInputUI();
       updateViewMode();
     });
 
@@ -867,17 +1133,20 @@
     // 全局狀態同步
     socket.on('state_sync', (state) => {
       if (state.groups && myGroupId) {
-        myGroupData = state.groups[myGroupId];
+        myGroupData = state.groups[myGroupId] || state.groups[normalizeGroupId(myGroupId)];
       }
       if (state.game4) {
         game4State = state.game4;
-        isTurnGroup = myGroupId === state.game4.turnGroup;
+        isTurnGroup = (normalizeGroupId(myGroupId) === normalizeGroupId(state.game4.turnGroup));
+        unlockStudentInputUI();
         updateViewMode();
       }
     });
 
     // 初始渲染對照表
     renderMorseReferenceGrid();
+    renderBinaryReferenceGrid('binaryRefGridEncoder');
+    renderBinaryReferenceGrid('binaryRefGridDecoder');
   </script>
 </body>
 </html>

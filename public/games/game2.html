@@ -316,8 +316,30 @@
     studentIdDisplay.innerText = myStudentId.toUpperCase();
     studentAvatar.innerText    = myStudentId.toUpperCase();
 
+    let studentState = 'LOBBY_WAITING';
+
     // 加入房間
     socket.emit('student_join', { studentId: myStudentId });
+
+    // 心跳包
+    setInterval(() => {
+      if (myStudentId) {
+        socket.emit('student_heartbeat', { studentId: myStudentId });
+      }
+    }, 5000);
+
+    // 強制重置監聽
+    socket.on('FORCE_RESET_LOBBY', () => {
+      localStorage.removeItem('studentId');
+      localStorage.removeItem('latestScore');
+      sessionStorage.clear();
+      studentState = 'LOBBY_WAITING';
+      if (window.parent && window.parent !== window && typeof window.parent.logoutStudent === 'function') {
+        window.parent.logoutStudent();
+      } else {
+        window.location.href = '/';
+      }
+    });
 
     socket.on('student_ready', (data) => {
       myStudentData = data.student;
@@ -335,8 +357,25 @@
       checkGameState(state);
     });
 
-    socket.on('game_started', () => { sound.playVictory(); showStageBinary(); });
-    socket.on('game_reset',   () => { showWaitingLobby(); });
+    // 關卡切換狀態廣播：接收 STAGE2_ACTIVE 事件並解除等待卡死狀態
+    socket.on('STAGE2_ACTIVE', (data) => {
+      studentState = 'STAGE2_ACTIVE';
+      sound.playVictory();
+      showStageBinary();
+    });
+
+    socket.on('game_started', (data) => {
+      if (!data || data.currentGame === 2 || !data.currentGame) {
+        studentState = 'STAGE2_ACTIVE';
+        sound.playVictory();
+        showStageBinary();
+      }
+    });
+
+    socket.on('game_reset',   () => {
+      studentState = 'LOBBY_WAITING';
+      showWaitingLobby();
+    });
 
     // ── 大廳 UI ──────────────────────────────────────────
     function updateLobbyUI(gameState) {
@@ -361,14 +400,17 @@
       if (!myStudentData) return;
       if (myStudentData.finished) {
         showVictoryScreen();
-      } else if (gameState.status === 'in_progress') {
+      } else if (gameState.status === 'STAGE2_ACTIVE' || gameState.status === 'GAME_START' || gameState.status === 'in_progress') {
+        studentState = 'STAGE2_ACTIVE';
         showStageBinary();
       } else {
+        studentState = 'LOBBY_WAITING';
         showWaitingLobby();
       }
     }
 
     function showWaitingLobby() {
+      studentState = 'LOBBY_WAITING';
       stageWaiting.classList.remove('hidden');
       stageBinary.classList.add('hidden');
       stageDragDrop.classList.add('hidden');

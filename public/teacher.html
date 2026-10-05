@@ -288,6 +288,7 @@
           </div>
         </div>
       </div>
+    </div>
     <!-- 遊戲四專用：大螢幕戰況投影面板 (Caesar-Morse Code Duel Dashboard) -->
     <div id="stage4Section" class="hidden flex flex-col gap-6">
       <!-- 頂部資訊與控制工具列 -->
@@ -312,6 +313,12 @@
           <button onclick="simulateGame4Round()" class="px-3.5 py-2 rounded-xl bg-amber-950/60 hover:bg-amber-900/80 border border-amber-500/40 text-amber-300 text-xs font-bold transition-all flex items-center gap-1.5" title="一鍵模擬出題組與解密組輸入，方便示範">
             <span>⚡ 模擬回合進度</span>
           </button>
+          <button onclick="forceAdvanceGame4()" class="px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-300 text-xs font-bold transition-all flex items-center gap-1.5" title="強制跳過未提交學生，直接進入下一階段">
+            <span>⚡ 強制進入下一階段</span>
+          </button>
+          <button onclick="skipAbsentStudents()" class="px-3.5 py-2 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/40 text-purple-300 text-xs font-bold transition-all flex items-center gap-1.5" title="跳過未回應學生，強制結算">
+            <span>🚫 跳過未回應學生</span>
+          </button>
           <button onclick="settleGame4RoundManual()" class="px-3.5 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 text-xs font-bold transition-all flex items-center gap-1.5" title="強制結算當前回合">
             <span>🏁 結算本回合</span>
           </button>
@@ -320,6 +327,21 @@
           </button>
         </div>
       </div>
+
+      <!-- 26 字母二進位對照表 -->
+      <details class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 text-xs">
+        <summary class="font-bold text-slate-300 flex items-center justify-between list-none cursor-pointer">
+          <span class="flex items-center gap-2 text-amber-400">
+            <span>📋</span>
+            <span>26 字母二進位碼對照表 (A=00001 ~ Z=11010) — 點擊展開/收起</span>
+          </span>
+          <span class="text-slate-500">▼</span>
+        </summary>
+        <div class="mt-3 pt-3 border-t border-slate-800/80">
+          <p class="text-[11px] text-slate-400 mb-2">請利用此二進位對照表，推算並解碼對手的英文字母。（A=1, B=2, ... Z=26，轉為 5 位二進位）</p>
+          <div id="t4BinaryRefGrid" class="grid grid-cols-6 sm:grid-cols-9 md:grid-cols-13 gap-1 font-mono text-[10px]"></div>
+        </div>
+      </details>
 
       <!-- 戰況網格：左側出題與密碼投影 / 右側解密組作答狀態 -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -102,6 +102,31 @@ socket.on('state_sync', (state) => {
   checkGameState(state);
 });
 
+// 心跳包
+setInterval(() => {
+  if (myStudentId) {
+    socket.emit('student_heartbeat', { studentId: myStudentId });
+  }
+}, 5000);
+
+// 強制全域重置監聽 (FORCE_RESET_LOBBY)
+socket.on('FORCE_RESET_LOBBY', () => {
+  localStorage.removeItem('studentId');
+  localStorage.removeItem('latestScore');
+  sessionStorage.clear();
+  window.location.href = '/';
+});
+
+// 關卡切換狀態廣播：接收 STAGE2_ACTIVE
+socket.on('STAGE2_ACTIVE', () => {
+  window.location.href = '/games/game2.html';
+});
+
+// 遊戲四啟動事件廣播：接收 START_STAGE_4
+socket.on('START_STAGE_4', () => {
+  window.location.href = '/games/game4.html';
+});
+
 // 老師點擊「遊戲開始」廣播
 socket.on('game_started', (data) => {
   sound.playVictory();
@@ -109,7 +134,7 @@ socket.on('game_started', (data) => {
     window.location.href = '/games/game4.html';
   } else if (data && data.currentGame === 3) {
     window.location.href = '/games/game3.html';
-  } else if (data && data.currentGame === 2) {
+  } else if (data && (data.currentGame === 2 || data.status === 'STAGE2_ACTIVE')) {
     window.location.href = '/games/game2.html';
   } else {
     showStage1();
@@ -181,12 +206,12 @@ function checkGameState(gameState) {
     showVictoryScreen();
   } else if (myStudentData.stage1Score !== null && myStudentData.stage2Score === null) {
     showStage2();
-  } else if (gameState.status === 'GAME_START' || gameState.status === 'in_progress') {
+  } else if (gameState.status === 'GAME_START' || gameState.status === 'STAGE2_ACTIVE' || gameState.status === 'in_progress') {
     if (gameState.currentGame === 4) {
       window.location.href = '/games/game4.html';
     } else if (gameState.currentGame === 3) {
       window.location.href = '/games/game3.html';
-    } else if (gameState.currentGame === 2) {
+    } else if (gameState.currentGame === 2 || gameState.status === 'STAGE2_ACTIVE') {
       window.location.href = '/games/game2.html';
     } else if (!stage1Completed && myStudentData.stage1Score === null) {
       showStage1();

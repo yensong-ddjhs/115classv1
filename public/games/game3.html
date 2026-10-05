@@ -503,11 +503,80 @@
       }
     });
 
+    // 心跳包
+    setInterval(() => {
+      if (myStudentId) {
+        socket.emit('student_heartbeat', { studentId: myStudentId });
+      }
+    }, 5000);
+
+    // 強制重置監聽 (FORCE_RESET_LOBBY)
+    socket.on('FORCE_RESET_LOBBY', () => {
+      localStorage.removeItem('studentId');
+      localStorage.removeItem('latestScore');
+      sessionStorage.clear();
+      if (window.parent && window.parent !== window && typeof window.parent.logoutStudent === 'function') {
+        window.parent.logoutStudent();
+      } else {
+        window.location.href = '/';
+      }
+    });
+
+    // 實時座標廣播接收 (同房另一位玩家移動同步)
+    socket.on('player_movement', (data) => {
+      if (data.studentId && data.studentId !== myStudentId) {
+        if (!allPlayers[data.studentId]) {
+          allPlayers[data.studentId] = {
+            id: data.studentId,
+            groupId: data.groupId,
+            code: data.code || '??',
+            color: data.color || '#f59e0b',
+            x: data.x,
+            y: data.y,
+            hp: data.hp || 100,
+            competeCount: 0
+          };
+        } else {
+          allPlayers[data.studentId].x = data.x;
+          allPlayers[data.studentId].y = data.y;
+          if (data.hp !== undefined) allPlayers[data.studentId].hp = data.hp;
+        }
+
+        // 客戶端 Hitbox 碰撞檢測 (玩家 A 與 玩家 B)
+        checkClientHitboxCollision(allPlayers[data.studentId]);
+      }
+    });
+
+    // 玩家 A 與 玩家 B 的 Hitbox 碰撞檢測函式
+    function checkClientHitboxCollision(other) {
+      if (isGameOver || !myPlayer || !other) return;
+      if (currentEncounter || currentBattle) return;
+      if (myPlayer.competeCount >= 3) return;
+      if (other.groupId && myPlayer.groupId && String(other.groupId).replace('group_','') === String(myPlayer.groupId).replace('group_','')) return;
+
+      const dx = myPlayer.x - other.x;
+      const dy = myPlayer.y - other.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Hitbox 碰撞判定 (半徑 25px, 距離 <= 50px 判定為重疊交疊)
+      if (dist <= 50) {
+        socket.emit('player_collision', {
+          studentId: myPlayer.id,
+          targetId: other.id,
+          x: myPlayer.x,
+          y: myPlayer.y
+        });
+      }
+    }
+
     // 伺服器廣播學生位置 (上帝視角或全域同步)
     socket.on('stage3_player_moved', (data) => {
       if (allPlayers[data.studentId]) {
         allPlayers[data.studentId].x = data.x;
         allPlayers[data.studentId].y = data.y;
+        if (data.studentId !== myStudentId) {
+          checkClientHitboxCollision(allPlayers[data.studentId]);
+        }
       }
     });
 
@@ -900,10 +969,15 @@
         myPlayer.y = Math.max(25, Math.min(MAP_HEIGHT - 25, myPlayer.y + dy));
         coordDisplay.innerText = `X: ${Math.round(myPlayer.x)}, Y: ${Math.round(myPlayer.y)}`;
 
-        // 發送位置至伺服器 (節流 45ms)
+        // 發送位置至伺服器 (發送 player_movement 與相容 player_move，節流 40ms)
         const now = Date.now();
-        if (now - lastMoveSent > 45) {
+        if (now - lastMoveSent > 40) {
           lastMoveSent = now;
+          socket.emit('player_movement', {
+            studentId: myPlayer.id,
+            x: myPlayer.x,
+            y: myPlayer.y
+          });
           socket.emit('player_move', {
             studentId: myPlayer.id,
             x: myPlayer.x,

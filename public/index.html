@@ -363,6 +363,9 @@
       // 載入當前老師指派的遊戲
       switchGame(currentGameId);
 
+      // 啟動心跳包
+      startStudentHeartbeat();
+
       // 依當前遊戲狀態控制遮罩
       if (!isGameStarted) {
         setWaitingOverlay(true);
@@ -473,6 +476,27 @@
       }
     }
 
+    // 心跳包維護 (維持真實上線名單)
+    let heartbeatInterval = null;
+    function startStudentHeartbeat() {
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      heartbeatInterval = setInterval(() => {
+        if (loggedStudentId) {
+          socket.emit('student_heartbeat', { studentId: loggedStudentId });
+        }
+      }, 5000);
+    }
+
+    // 0. 強制全域重置廣播監聽 (FORCE_RESET_LOBBY)
+    // 學生端接收到廣播後，自動清空 LocalStorage/SessionStorage 的座號記錄，將 UI 強制跳轉回「初始座號輸入登入頁面」
+    socket.on('FORCE_RESET_LOBBY', () => {
+      localStorage.removeItem('studentId');
+      localStorage.removeItem('latestScore');
+      sessionStorage.clear();
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      logoutStudent();
+    });
+
     // 1. 監聽老師切換遊戲模組（限制學生選單並載入對應遊戲）
     socket.on('game_switched', (data) => {
       if (data && data.currentGame) {
@@ -487,7 +511,27 @@
       }
     });
 
-    // 3. 監聽老師點擊「開始遊戲」（解除等待遮罩，學生正式開始操作）
+    // 3. 遊戲二專屬狀態事件：解除等待卡死狀態 (STAGE2_ACTIVE)
+    socket.on('STAGE2_ACTIVE', (data) => {
+      isGameStarted = true;
+      loadGameInIframe(2);
+      setWaitingOverlay(false);
+      if (window.sound && typeof sound.playVictory === 'function') {
+        sound.playVictory();
+      }
+    });
+
+    // 4. 遊戲四專屬狀態事件：啟動遊戲四 (START_STAGE_4)
+    socket.on('START_STAGE_4', (data) => {
+      isGameStarted = true;
+      loadGameInIframe(4);
+      setWaitingOverlay(false);
+      if (window.sound && typeof sound.playVictory === 'function') {
+        sound.playVictory();
+      }
+    });
+
+    // 5. 監聽老師點擊「開始遊戲」（解除等待遮罩，學生正式開始操作）
     socket.on('game_started', (data) => {
       isGameStarted = true;
       if (data && data.currentGame) {
@@ -499,7 +543,7 @@
       }
     });
 
-    // 4. 監聽老師點擊「重新開始 / 重置遊戲」（恢復等待鎖定，重新載入 iframe 清除上一局狀態與位置）
+    // 6. 監聽老師點擊「重新開始 / 重置遊戲」
     socket.on('game_reset', () => {
       isGameStarted = false;
       setWaitingOverlay(true);
@@ -509,7 +553,7 @@
       }
     });
 
-    // 5. 伺服器狀態同步（全域狀態與在線狀態校正）
+    // 7. 伺服器狀態同步（全域狀態與在線狀態校正）
     socket.on('state_sync', (state) => {
       if (state.currentGame) {
         const targetId = `game${state.currentGame}`;
@@ -520,7 +564,7 @@
 
       renderLobbyStatusMachine(state);
 
-      if (state.status === 'GAME_START' || state.status === 'in_progress') {
+      if (state.status === 'GAME_START' || state.status === 'STAGE2_ACTIVE' || state.status === 'in_progress') {
         isGameStarted = true;
         setWaitingOverlay(false);
       } else {

@@ -110,11 +110,10 @@ async function runGame4Test() {
   }
 
   // 8. 解密組進行解密作答並提交答案
-  console.log('8. 解密組 (group_2) 進行還原解密並送出答案...');
+  console.log('8. 解密組進行還原解密並送出答案...');
   // 解密組成員收到摩斯碼 . --.- ..-. --.
   // 查表得 EQFG，逆向位移 -2 得原始答案 CODE
-  const decryptGroupMember = Object.keys(s2G4.groups).find(gId => gId !== turnGroupId);
-  const decryptStudentId = s2G4.groups[decryptGroupMember].members[0];
+  const decryptStudentId = 's06';
 
   const submitRes = await new Promise(resolve => {
     student2Socket.emit('game4_submit_decryption', {
